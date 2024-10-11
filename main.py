@@ -46,6 +46,9 @@ class Class(Base):
     __tablename__ = "class"
     class_id = Column(Integer, primary_key=True, autoincrement=True)
     name_class = Column(VARCHAR(255), nullable=False)
+    years = Column(String(36))
+    total_student = Column(Integer )
+    id_grades = Column(Integer,  ForeignKey('grades.grades_id'), nullable=False)
 class Student(Base):
     __tablename__ = "student"
     student_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -69,6 +72,10 @@ class Comment(Base):
     context = Column(Text, nullable=False)
     student_id = Column(String(36), ForeignKey('student.student_id'), nullable=False)
     teacher_id = Column(String(36), ForeignKey('teacher.teacher_id'), nullable=False)
+class Grades(Base):
+    __tablename__ = "grades"
+    id_grades = Column(Integer, primary_key=True, autoincrement=True)
+    name_grades = Column(VARCHAR(255), nullable=False)
 # Dependency để lấy session
 def get_db():
     db = SessionLocal()
@@ -446,3 +453,39 @@ def search_students(name: str, db: Session = Depends(get_db)):
     return {
         "students": student_data
     }
+#Api lấy class theo khối
+
+@app.get("/api/admin/grades/classes")
+def get_all_grades_and_classes(db: Session = Depends(get_db)):
+    # Query all grades
+    grades = db.query(Grades).all()
+    if not grades:
+        raise HTTPException(status_code=404, detail="Không tìm thấy khối nào")
+    
+    grades_data = []
+    
+    # Loop through each grade and find the classes associated with it
+    for grade in grades:
+        classes = db.query(Class).filter(Class.id_grades == grade.id_grades).all()
+        
+        # Prepare class details for each grade
+        class_data = []
+        for classe in classes:
+            class_data.append({
+                "class_id": classe.class_id,
+                "name_class": classe.name_class,
+                "total_student": classe.total_student
+            })
+        
+        # Prepare grade details along with associated classes
+        grades_data.append({
+            "grade_id": grade.id_grades,
+            "grade_name": grade.name_grades,
+            "classes": class_data
+        })
+    
+    # Return the complete data structure
+    return {
+        "grades": grades_data
+    }
+
