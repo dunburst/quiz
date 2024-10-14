@@ -7,6 +7,7 @@ from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+from fastapi_pagination import Page, Params, paginate
 # Kết nối MySQL
 DATABASE_URL = "mysql+pymysql://root:12345@localhost:3306/quiz"
 engine = create_engine(DATABASE_URL)
@@ -235,38 +236,46 @@ def get_classes(class_id: int, db: Session = Depends(get_db)):
     }
 # Admin
 # API lấy toàn bộ thông tin học sinh
-@app.get("/api/admin/students")
-def get_all_students(db: Session = Depends(get_db)):
+@app.get("/api/admin/students", response_model=Page[dict])
+def get_all_students(db: Session = Depends(get_db), params: Params = Depends()):
     students = db.query(Student).all()
-    classe = db.query(Class).filter(Class.class_id == Student.class_id).first()
+    
+    # Kiểm tra nếu không có học sinh nào
     if not students:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không có học sinh nào")
+    
     # Tạo danh sách thông tin học sinh
     student_list = []
     for student in students:
+        # Lấy thông tin lớp của học sinh
+        classe = db.query(Class).filter(Class.class_id == student.class_id).first()
+        
         student_info = {
             "student_id": student.student_id,
             "name": student.name,
             "birth_date": student.birth_date,
-            "email": student.email,
             "phone_number": student.phone_number,
-            "image": student.image,
-            "name_class": classe.name_class,
+            "name_class": classe.name_class if classe else "Không rõ",
+            "gender": student.gender
         }
         student_list.append(student_info)
-    return student_list
+    
+    # Trả về dữ liệu với phân trang
+    return paginate(student_list, params)
 # API lấy toàn bộ thông tin giáo viên
-@app.get("/api/admin/teachers")
-def get_all_teachers(db: Session = Depends(get_db)):
+@app.get("/api/admin/teachers", response_model=Page[dict])
+def get_all_teachers(db: Session = Depends(get_db), params: Params = Depends()):
     teachers = db.query(Teacher).all()
     if not teachers:
         raise HTTPException(status_code=404, detail="Không có giáo viên nào được tìm thấy")
+    
     teacher_data = []
     for teacher in teachers:
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
         distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
         if not distributions:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy lớp nào cho giáo viên {teacher.name}")
+        
         class_info = []
         for distribution in distributions:
             class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
@@ -275,6 +284,7 @@ def get_all_teachers(db: Session = Depends(get_db)):
                     "class_id": class_data.class_id,
                     "name_class": class_data.name_class
                 })
+        
         teacher_data.append({
             "teacher_id": teacher.teacher_id,
             "name": teacher.name,
@@ -285,9 +295,8 @@ def get_all_teachers(db: Session = Depends(get_db)):
             "subject": subject.name_subject if subject else "Không rõ",
             "classes": class_info
         })
-    return {
-        "teachers": teacher_data
-    }
+    
+    return paginate(teacher_data, params)
 #API lấy thông tin cả giáo viên và học sinh theo lớp
 @app.get("/api/admin/classes/details/{class_id}")
 def get_class_details(class_id: int, db: Session = Depends(get_db)):
