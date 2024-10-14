@@ -26,6 +26,10 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 # Định nghĩa các bảng sử dụng SQLAlchemy
+class Admin(Base):
+    __tablename__ = "admin"
+    admin_id = Column(String(36), primary_key=True, autoincrement=True)
+    password = Column(VARCHAR(255), nullable=False)
 class Subject(Base):
     __tablename__ = "subject"
     subject_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -76,6 +80,23 @@ class Grades(Base):
     __tablename__ = "grades"
     id_grades = Column(Integer, primary_key=True, autoincrement=True)
     name_grades = Column(VARCHAR(255), nullable=False)
+class Quiz(Base):
+    __tablename__ = 'quiz'
+    quiz_id = Column(String(36), primary_key=True, index=True)
+    title = Column(String)
+    due_date = Column(DateTime)
+    time_limit = Column(Integer)
+    question_count = Column(Integer)
+    teacher_id = Column(Integer, ForeignKey('teacher.teacher_id'))
+class Grade(Base):
+    __tablename__ = 'grade'
+    grade_id = Column(String(36), primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey('student.student_id'))
+    quiz_id = Column(Integer, ForeignKey('quiz.quiz_id'))
+    score = Column(Float)
+    time_start = Column(DateTime)
+    time_end = Column(DateTime)
+    status = Column(String)
 # Dependency để lấy session
 def get_db():
     db = SessionLocal()
@@ -83,7 +104,6 @@ def get_db():
         yield db
     finally:
         db.close()
-# API đăng nhập và trả về thông tin người dùng dựa trên id (student_id hoặc teacher_id)
 # Định nghĩa Pydantic Model cho body của request
 class LoginRequest(BaseModel):
     user_id: str
@@ -119,7 +139,14 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             "email": teacher.email,
             "phone_number": teacher.phone_number
         }
-    
+      # Kiểm tra nếu là giáo viên
+    admin = db.query(Admin).filter(Admin.admin_id == request.user_id).first()
+    if admin:
+        if admin.password != request.password:  # Kiểm tra mật khẩu
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sai mật khẩu")
+        return {  # Trả về thông tin giáo viên
+            "id": admin.admin_id
+        }
     # Trả về lỗi nếu không tìm thấy người dùng
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy thông tin người dùng")
 # API đổi mật khẩu cho học sinh lần đầu đăng nhập
@@ -175,6 +202,34 @@ def get_student_class_subject_teacher(student_id: str, db: Session = Depends(get
         "class": class_info_data,
         "subjects": subjects_data
     }
+# API lấy thông tin các bài làm của sinh viên
+@app.get("/quizzes/{student_id}")
+def get_quizzes(student_id: int, db: Session = Depends(get_db)):
+    # Lấy thông tin học sinh, bao gồm cả class_id của học sinh đó
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Không tìm thấy học sinh")
+    # Lấy tất cả các quiz được phân cho lớp của học sinh
+    class_quiz_ids = db.query(Class_quiz.quiz_id).filter(Class_quiz.class_id == student.class_id).subquery()
+    # Lấy các quiz từ bảng Quiz và đối chiếu với bảng Grade (nếu có)
+    quizzes = db.query(Quiz, Grade).join(Grade, Quiz.quiz_id == Grade.quiz_id).filter(
+        Grade.student_id == student_id, Quiz.quiz_id.in_(class_quiz_ids)).all()
+
+    # Kiểm tra xem có quiz nào không
+    if not quizzes:
+        raise HTTPException(status_code=404, detail="Chưa có bài quiz nào cho học sinh này")
+    result = []
+    for quiz, grade in quizzes:
+        status = "Còn hạn" if quiz.due_date > datetime.now() else "Hết hạn"
+        result.append({
+            "status": status,
+            "title": quiz.title,
+            "due_date": quiz.due_date.strftime("%d/%m/%Y"),
+            "time_limit": f"{quiz.time_limit} phút",
+            "question_count": quiz.question_count,
+            "score": grade.score if grade.score else None
+        })
+    return result
 # Teacher
 # API lấy thông tin các lớp học mà giáo viên phụ trách dựa trên teacher_id
 @app.get("/api/teacher/classes/{teacher_id}")
@@ -454,7 +509,6 @@ def search_students(name: str, db: Session = Depends(get_db)):
         "students": student_data
     }
 #Api lấy class theo khối
-
 @app.get("/api/admin/grades/classes")
 def get_all_grades_and_classes(db: Session = Depends(get_db)):
     # Query all grades
@@ -488,4 +542,3 @@ def get_all_grades_and_classes(db: Session = Depends(get_db)):
     return {
         "grades": grades_data
     }
-
