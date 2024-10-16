@@ -1,12 +1,12 @@
-from fastapi import FastAPI, HTTPException, status, Depends
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, VARCHAR, Text
+from fastapi import FastAPI, HTTPException, status, Depends, Query
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, VARCHAR, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import uuid
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from fastapi_pagination import Page, Params, paginate
 # Kết nối MySQL
 DATABASE_URL = "mysql+pymysql://root:12345@localhost:3306/quiz"
@@ -89,12 +89,11 @@ class Quiz(Base):
     time_limit = Column(Integer)
     question_count = Column(Integer)
     teacher_id = Column(Integer, ForeignKey('teacher.teacher_id'))
-class Grade(Base):
-    __tablename__ = 'grade'
-    grade_id = Column(String(36), primary_key=True, index=True)
+class Score(Base):
+    __tablename__ = 'score'
+    score_id = Column(String(36), primary_key=True, index=True)
     student_id = Column(Integer, ForeignKey('student.student_id'))
     quiz_id = Column(Integer, ForeignKey('quiz.quiz_id'))
-    score = Column(Float)
     time_start = Column(DateTime)
     time_end = Column(DateTime)
     status = Column(String)
@@ -105,6 +104,13 @@ def get_db():
         yield db
     finally:
         db.close()
+# Hàm để cập nhật số lượng học sinh của lớp
+def update_total_students(class_id: int, db: Session):
+    total_students = db.query(Student).filter(Student.class_id == class_id).count()
+    class_obj = db.query(Class).filter(Class.class_id == class_id).first()
+    if class_obj:
+        class_obj.total_student = total_students
+        db.commit()
 # Định nghĩa Pydantic Model cho body của request
 class LoginRequest(BaseModel):
     user_id: str
@@ -189,7 +195,6 @@ def get_student_class_subject_teacher(student_id: str, db: Session = Depends(get
     for distribution in distributions:
         teacher = db.query(Teacher).filter(Teacher.teacher_id == distribution.teacher_id).first()
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
-
         subjects_data.append({
             "subject_id": subject.subject_id,
             "subject_name": subject.name_subject,
@@ -266,12 +271,10 @@ def get_classes(class_id: int, db: Session = Depends(get_db)):
     classe = db.query(Class).filter(Class.class_id == class_id).first()
     if not classe:
         raise HTTPException(status_code=404, detail="Không tìm thấy class")
-    
     # Lấy danh sách học sinh theo class_id
     students = db.query(Student).filter(Student.class_id == class_id).all()
     if not students:
         raise HTTPException(status_code=404)
-    
     # Tạo danh sách thông tin đầy đủ học sinh
     student_data = []
     for student in students:
@@ -411,31 +414,111 @@ def create_student(
     password: str,
     db: Session = Depends(get_db)
 ):
-    # Kiểm tra lớp học có tồn tại không
     class_info = db.query(Class).filter(Class.class_id == class_id).first()
     if not class_info:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học")
+    existing_student = db.query(Student).filter(Student.student_id == student_id).first()
+    if existing_student:
+        raise HTTPException(status_code=400, detail="Học sinh đã tồn tại")
     # Tạo một học sinh mới
     new_student = Student(
-        student_id = student_id,
+        student_id=student_id,
         name=name,
         gender=gender,
         birth_date=birth_date,
         email=email,
         phone_number=phone_number,
         class_id=class_id,
-        password = password,
+        password=password,  # Bạn có thể băm mật khẩu tại đây
         image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877',
         first_login=True
     )
-# Thêm học sinh mới vào cơ sở dữ liệu
+    # Thêm học sinh mới vào cơ sở dữ liệu
     db.add(new_student)
     db.commit()
+    # Cập nhật lại số lượng học sinh trong lớp
+    update_total_students(class_id, db)
+    # Làm mới đối tượng học sinh để lấy thông tin sau khi thêm
     db.refresh(new_student)
     return {
         "message": "Tạo tài khoản học sinh thành công",
         "student_id": new_student.student_id
     }
+#API sửa thông tin học sinh
+@app.put("/api/admin/update/student/{student_id}")
+def update_student(
+    student_id: str,
+    name: str = None,
+    gender: str = None,
+    birth_date: datetime = None,
+    email: str = None,
+    phone_number: str = None,
+    class_id: int = None,
+    password: str = None,
+    db: Session = Depends(get_db)
+):
+    # Tìm học sinh cần cập nhật
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Học sinh không tồn tại")
+
+    # Cập nhật thông tin học sinh
+    if name:
+        student.name = name
+    if gender:
+        student.gender = gender
+    if birth_date:
+        student.birth_date = birth_date
+    if email:
+        student.email = email
+    if phone_number:
+        student.phone_number = phone_number
+    if class_id:
+        # Kiểm tra xem lớp học có tồn tại không
+        class_info = db.query(Class).filter(Class.class_id == class_id).first()
+        if not class_info:
+            raise HTTPException(status_code=404, detail="Không tìm thấy lớp học")
+        # Cập nhật class_id và cập nhật số học sinh của lớp cũ và lớp mới
+        old_class_id = student.class_id
+        student.class_id = class_id
+        update_total_students(old_class_id, db)
+        update_total_students(class_id, db)
+    if password:
+        student.password = password  # Có thể băm mật khẩu nếu cần
+
+    # Lưu thay đổi vào cơ sở dữ liệu
+    db.commit()
+    db.refresh(student)
+
+    return {
+        "message": "Cập nhật tài khoản học sinh thành công",
+        "student_id": student.student_id
+    }
+# API tìm kiếm học sinh với phân trang
+@app.get("/api/admin/students/search", response_model=Page[dict])
+def search_students(name: str, db: Session = Depends(get_db), params: Params = Depends()):
+    students = db.query(Student).filter(Student.name.ilike(f"%{name}%")).all()
+    
+    if not students:
+        raise HTTPException(status_code=404, detail="Không tìm thấy học sinh nào")
+    
+    # Lấy thông tin học sinh và lớp
+    student_data = []
+    for student in students:
+        classe = db.query(Class).filter(Class.class_id == student.class_id).first()
+        
+        student_info = {
+            "student_id": student.student_id,
+            "name": student.name,
+            "birth_date": student.birth_date,
+            "phone_number": student.phone_number,
+            "name_class": classe.name_class if classe else "Không rõ",
+            "gender": student.gender
+        }
+        student_data.append(student_info)
+    
+    # Trả về kết quả phân trang
+    return paginate(student_data, params)
 # API thêm tài khoản giáo viên mới
 @app.post("/api/admin/create/teachers")
 def create_teacher(
@@ -447,16 +530,15 @@ def create_teacher(
     phone_number: str,
     subject_id: int,
     password: str,
+    class_ids: List[int],  # Danh sách ID lớp học để phân công cho giáo viên
     db: Session = Depends(get_db)
 ):
-    # Kiểm tra môn học có tồn tại không
     subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Không tìm thấy môn học")
     
-    # Tạo một giáo viên mới
     new_teacher = Teacher(
-        teacher_id = teacher_id,
+        teacher_id=teacher_id,
         name=name,
         gender=gender,
         birth_date=birth_date,
@@ -464,25 +546,111 @@ def create_teacher(
         phone_number=phone_number,
         subject_id=subject_id,
         password=password,
-        image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877',  # Có thể sửa lại URL ảnh phù hợp
+        image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877',  # Thay đổi URL hình ảnh nếu cần
     )
-    # Thêm giáo viên mới vào cơ sở dữ liệu
     db.add(new_teacher)
-    db.commit()
+    db.commit()  # Lưu giáo viên trước
+    for class_id in class_ids:
+        _class = db.query(Class).filter(Class.class_id == class_id).first()
+        if not _class:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy lớp với ID {class_id}")
+        
+        new_distribution = Distribution(
+            class_id=class_id,
+            teacher_id=teacher_id
+        )
+        db.add(new_distribution)
+    db.commit()  # Lưu phân công lớp học sau
     db.refresh(new_teacher)
     return {
-        "message": "Tạo tài khoản giáo viên thành công",
+        "message": "Tạo tài khoản giáo viên và phân công lớp thành công",
         "teacher_id": new_teacher.teacher_id
     }
+#API sửa thông tin giáo viên
+@app.put("/api/admin/update/teacher/{teacher_id}")
+def update_teacher(
+    teacher_id: str,
+    name: str = None,
+    gender: str = None,
+    birth_date: datetime = None,
+    email: str = None,
+    phone_number: str = None,
+    subject_id: int = None,
+    password: str = None,
+    class_ids: List[int] = None,  # Cập nhật phân công lớp học
+    db: Session = Depends(get_db)
+):
+    # Tìm giáo viên cần cập nhật
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Giáo viên không tồn tại")
+
+    # Cập nhật thông tin giáo viên
+    if name:
+        teacher.name = name
+    if gender:
+        teacher.gender = gender
+    if birth_date:
+        teacher.birth_date = birth_date
+    if email:
+        teacher.email = email
+    if phone_number:
+        teacher.phone_number = phone_number
+    if subject_id:
+        subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+        if not subject:
+            raise HTTPException(status_code=404, detail="Không tìm thấy môn học")
+        teacher.subject_id = subject_id
+    if password:
+        teacher.password = password  # Có thể băm mật khẩu nếu cần
+
+    # Cập nhật danh sách lớp phân công nếu có
+    if class_ids is not None:
+        # Xóa các phân công lớp hiện tại
+        db.query(Distribution).filter(Distribution.teacher_id == teacher_id).delete()
+        for class_id in class_ids:
+            _class = db.query(Class).filter(Class.class_id == class_id).first()
+            if not _class:
+                raise HTTPException(status_code=404, detail=f"Không tìm thấy lớp với ID {class_id}")
+            new_distribution = Distribution(
+                class_id=class_id,
+                teacher_id=teacher_id
+            )
+            db.add(new_distribution)
+
+    # Lưu thay đổi vào cơ sở dữ liệu
+    db.commit()
+    db.refresh(teacher)
+
+    return {
+        "message": "Cập nhật tài khoản giáo viên thành công",
+        "teacher_id": teacher.teacher_id
+    }
 # API tìm kiếm theo tên giáo viên
-@app.get("/api/admin/teachers/search")
-def search_teachers(name: str, db: Session = Depends(get_db)):
-    teachers = db.query(Teacher).filter(Teacher.name.ilike(f"%{name}%")).all()
+@app.get("/api/admin/teachers/search", response_model=Page[dict])
+def search_teachers(name: str, db: Session = Depends(get_db), params: Params = Depends()):
+    query = db.query(Teacher).filter(Teacher.name.ilike(f"%{name}%"))
+    
+    # Lấy tổng số lượng giáo viên để phân trang
+    teachers = query.offset((params.page - 1) * params.size).limit(params.size).all()
+
     if not teachers:
         raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên nào")
+    
     teacher_data = []
     for teacher in teachers:
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+        distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
+
+        class_info = []
+        for distribution in distributions:
+            class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
+            if class_data:
+                class_info.append({
+                    "class_id": class_data.class_id,
+                    "name_class": class_data.name_class
+                })
+
         teacher_data.append({
             "teacher_id": teacher.teacher_id,
             "name": teacher.name,
@@ -491,32 +659,12 @@ def search_teachers(name: str, db: Session = Depends(get_db)):
             "email": teacher.email,
             "phone_number": teacher.phone_number,
             "subject": subject.name_subject if subject else "Không rõ",
+            "classes": class_info
         })
     
-    return {
-        "teachers": teacher_data
-    }
-# API tìm kiếm theo tên học sinh
-@app.get("/api/admin/students/search")
-def search_students(name: str, db: Session = Depends(get_db)):
-    students = db.query(Student).filter(Student.name.ilike(f"%{name}%")).all()
-    if not students:
-        raise HTTPException(status_code=404, detail="Không tìm thấy học sinh nào")
-    student_data = []
-    for student in students:
-        student_data.append({
-            "student_id": student.student_id,
-            "name": student.name,
-            "image": student.image,
-            "gender": student.gender,
-            "birth_date": student.birth_date,
-            "email": student.email,
-            "phone_number": student.phone_number,
-        })
-    
-    return {
-        "students": student_data
-    }
+    # Trả về dữ liệu đã phân trang
+    return paginate(teacher_data, params)
+
 #Api lấy class theo khối
 @app.get("/api/admin/grades/classes")
 def get_all_grades_and_classes(db: Session = Depends(get_db)):
@@ -524,13 +672,10 @@ def get_all_grades_and_classes(db: Session = Depends(get_db)):
     grades = db.query(Grades).all()
     if not grades:
         raise HTTPException(status_code=404, detail="Không tìm thấy khối nào")
-    
     grades_data = []
-    
     # Loop through each grade and find the classes associated with it
     for grade in grades:
         classes = db.query(Class).filter(Class.id_grades == grade.id_grades).all()
-        
         # Prepare class details for each grade
         class_data = []
         for classe in classes:
@@ -539,14 +684,12 @@ def get_all_grades_and_classes(db: Session = Depends(get_db)):
                 "name_class": classe.name_class,
                 "total_student": classe.total_student
             })
-        
         # Prepare grade details along with associated classes
         grades_data.append({
             "grade_id": grade.id_grades,
             "grade_name": grade.name_grades,
             "classes": class_data
         })
-    
     # Return the complete data structure
     return {
         "grades": grades_data
