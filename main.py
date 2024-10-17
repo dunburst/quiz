@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Query
+from fastapi import FastAPI, HTTPException, status, Depends, Query,APIRouter    
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, VARCHAR, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -8,6 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from fastapi_pagination import Page, Params, paginate
+from sqlalchemy.exc import IntegrityError
+
+
+
 # Kết nối MySQL
 DATABASE_URL = "mysql+pymysql://root:12345@localhost:3306/quiz"
 engine = create_engine(DATABASE_URL)
@@ -114,6 +118,27 @@ def update_total_students(class_id: int, db: Session):
 # Định nghĩa Pydantic Model cho body của request
 class LoginRequest(BaseModel):
     user_id: str
+    password: str
+
+class TeacherCreate(BaseModel):
+    teacher_id: str
+    name: str
+    gender: str
+    birth_date: datetime
+    email: str
+    phone_number: str
+    subject_id: int
+    password: str
+    class_ids: List[int]  # Danh sách ID lớp học để phân công cho giáo viên
+
+class StudentCreate(BaseModel):
+    student_id: str
+    name: str
+    gender: str
+    birth_date: datetime
+    email: str
+    phone_number: str
+    class_id: int
     password: str
 
 # API đăng nhập
@@ -402,44 +427,47 @@ def get_class_details(class_id: int, db: Session = Depends(get_db)):
         "students": student_data
     }
 # API thêm tài khoản học sinh mới
+
+
 @app.post("/api/admin/create/students")
 def create_student(
-    student_id: str,
-    name: str,
-    gender: str,
-    birth_date: datetime,
-    email: str,
-    phone_number: str,
-    class_id: int,
-    password: str,
+    student_data: StudentCreate,  # Nhận dữ liệu từ body
     db: Session = Depends(get_db)
 ):
-    class_info = db.query(Class).filter(Class.class_id == class_id).first()
+    # Kiểm tra xem class_id có tồn tại không
+    class_info = db.query(Class).filter(Class.class_id == student_data.class_id).first()
     if not class_info:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học")
-    existing_student = db.query(Student).filter(Student.student_id == student_id).first()
+    
+    # Kiểm tra student_id đã tồn tại chưa
+    existing_student = db.query(Student).filter(Student.student_id == student_data.student_id).first()
     if existing_student:
-        raise HTTPException(status_code=400, detail="Học sinh đã tồn tại")
-    # Tạo một học sinh mới
+        raise HTTPException(status_code=400, detail="Mã học sinh đã tồn tại")
+    
+    # Tạo mới một học sinh
     new_student = Student(
-        student_id=student_id,
-        name=name,
-        gender=gender,
-        birth_date=birth_date,
-        email=email,
-        phone_number=phone_number,
-        class_id=class_id,
-        password=password,  # Bạn có thể băm mật khẩu tại đây
+        student_id=student_data.student_id,
+        name=student_data.name,
+        gender=student_data.gender,
+        birth_date=student_data.birth_date,
+        email=student_data.email,
+        phone_number=student_data.phone_number,
+        class_id=student_data.class_id,
+        password=student_data.password,  # Bạn có thể băm mật khẩu tại đây
         image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877',
         first_login=True
     )
-    # Thêm học sinh mới vào cơ sở dữ liệu
-    db.add(new_student)
-    db.commit()
-    # Cập nhật lại số lượng học sinh trong lớp
-    update_total_students(class_id, db)
-    # Làm mới đối tượng học sinh để lấy thông tin sau khi thêm
-    db.refresh(new_student)
+    
+    try:
+        db.add(new_student)
+        db.commit()  # Lưu thông tin học sinh mới
+        db.refresh(new_student)  # Làm mới đối tượng học sinh để có thông tin cập nhật
+    except IntegrityError:
+        db.rollback()  # Rollback nếu có lỗi trùng lặp
+        raise HTTPException(status_code=400, detail="Duplicate entry for student_id")
+    
+    # Sau khi tạo xong sinh viên, bạn có thể thêm logic khác nếu cần
+    
     return {
         "message": "Tạo tài khoản học sinh thành công",
         "student_id": new_student.student_id
@@ -520,48 +548,59 @@ def search_students(name: str, db: Session = Depends(get_db), params: Params = D
     # Trả về kết quả phân trang
     return paginate(student_data, params)
 # API thêm tài khoản giáo viên mới
+router = APIRouter()
+
+
 @app.post("/api/admin/create/teachers")
 def create_teacher(
-    teacher_id: str,
-    name: str,
-    gender: str,
-    birth_date: datetime,
-    email: str,
-    phone_number: str,
-    subject_id: int,
-    password: str,
-    class_ids: List[int],  # Danh sách ID lớp học để phân công cho giáo viên
+    teacher_data: TeacherCreate,  # Receive request body as JSON
     db: Session = Depends(get_db)
 ):
-    subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+    # Check if subject_id exists
+    subject = db.query(Subject).filter(Subject.subject_id == teacher_data.subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Không tìm thấy môn học")
     
+    # Check if teacher_id already exists
+    existing_teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_data.teacher_id).first()
+    if existing_teacher:
+        raise HTTPException(status_code=400, detail="Mã giáo viên đã tồn tại")
+    
+    # Create new teacher
     new_teacher = Teacher(
-        teacher_id=teacher_id,
-        name=name,
-        gender=gender,
-        birth_date=birth_date,
-        email=email,
-        phone_number=phone_number,
-        subject_id=subject_id,
-        password=password,
-        image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877',  # Thay đổi URL hình ảnh nếu cần
+        teacher_id=teacher_data.teacher_id,
+        name=teacher_data.name,
+        gender=teacher_data.gender,
+        birth_date=teacher_data.birth_date,
+        email=teacher_data.email,
+        phone_number=teacher_data.phone_number,
+        subject_id=teacher_data.subject_id,
+        password=teacher_data.password,
+        image='https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877'
     )
-    db.add(new_teacher)
-    db.commit()  # Lưu giáo viên trước
-    for class_id in class_ids:
+    
+    try:
+        db.add(new_teacher)
+        db.commit()  # Commit to save the teacher
+        db.refresh(new_teacher)  # Refresh the instance to get updated info
+    except IntegrityError:
+        db.rollback()  # Rollback the transaction in case of error
+        raise HTTPException(status_code=400, detail="Duplicate entry for teacher_id")
+    
+    # Assign the teacher to classes (second part)
+    for class_id in teacher_data.class_ids:
         _class = db.query(Class).filter(Class.class_id == class_id).first()
         if not _class:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy lớp với ID {class_id}")
         
         new_distribution = Distribution(
             class_id=class_id,
-            teacher_id=teacher_id
+            teacher_id=new_teacher.teacher_id  # Use the saved teacher_id
         )
         db.add(new_distribution)
-    db.commit()  # Lưu phân công lớp học sau
-    db.refresh(new_teacher)
+    
+    db.commit()  # Commit to save the class assignments
+    
     return {
         "message": "Tạo tài khoản giáo viên và phân công lớp thành công",
         "teacher_id": new_teacher.teacher_id
