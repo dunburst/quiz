@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, status, Depends, Query,APIRouter    
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, VARCHAR, Text, Float
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, VARCHAR, Text, Float, Time
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import uuid
@@ -87,12 +87,24 @@ class Grades(Base):
     name_grades = Column(VARCHAR(255), nullable=False)
 class Quiz(Base):
     __tablename__ = 'quiz'
-    quiz_id = Column(String(36), primary_key=True, index=True)
+    quiz_id = Column(String(36),primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String)
     due_date = Column(DateTime)
     time_limit = Column(Integer)
     question_count = Column(Integer)
     teacher_id = Column(Integer, ForeignKey('teacher.teacher_id'))
+
+class Questions(Base):
+    __tablename__ = 'questions'
+    question_id = Column(String(36),primary_key=True, default=lambda: str(uuid.uuid4()))
+    quiz_id = Column(String(36), ForeignKey('quiz.quiz_id'))
+    question_text= Column(Text, nullable=False)
+class Answer(Base):
+    __tablename__ = 'answer'
+    answer_id = Column(String(36),primary_key=True, default=lambda: str(uuid.uuid4()))
+    question_id = Column(String(36), ForeignKey('questions.question_id'))
+    answer = Column(Text)
+    is_correct = Column(Boolean, default=True)
 class Score(Base):
     __tablename__ = 'score'
     score_id = Column(String(36), primary_key=True, index=True)
@@ -101,6 +113,13 @@ class Score(Base):
     time_start = Column(DateTime)
     time_end = Column(DateTime)
     status = Column(String)
+class Class_quiz(Base):
+     __tablename__ = 'class_quiz'
+     class_quiz_id = Column(String(36), primary_key=True, index=True)
+     class_id = Column(Integer, ForeignKey('class.class_id'))   
+     quiz_id = Column(String(36), ForeignKey('quiz.quiz_id'))
+
+    
 # Dependency để lấy session
 def get_db():
     db = SessionLocal()
@@ -317,6 +336,115 @@ def get_classes(class_id: int, db: Session = Depends(get_db)):
         "name_class": classe.name_class,
         "students": student_data
     }
+#Tạo quiz
+class AnswerCreate(BaseModel):
+    answer: str
+    is_correct: bool
+class QuestionCreate(BaseModel):
+    question_text: str
+    answers: List[AnswerCreate]
+class QuizCreate(BaseModel):
+    title: str
+    due_date: datetime
+    time_limit: int
+    teacher_id: str
+    questions: List[QuestionCreate]
+#API lấy thông tin bài tập của giáo viên 
+
+@app.get("/api/admin/quizzes", response_model=Page[dict])
+def get_all_quizzes(db: Session = Depends(get_db), params: Params = Depends()):
+    quizzes = db.query(Quiz).all()
+    
+    # Kiểm tra nếu không có quiz nào
+    if not quizzes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không có quiz nào")
+    
+    # Tạo danh sách thông tin quiz
+    quiz_list = []
+    for quiz in quizzes:
+        # Lấy thông tin giáo viên
+        teacher = db.query(Teacher).filter(Teacher.teacher_id == quiz.teacher_id).first()
+        
+        # Lấy thông tin lớp từ bảng class_quiz
+        class_quizzes = db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz.quiz_id).all()
+        class_ids = [class_quiz.class_id for class_quiz in class_quizzes] if class_quizzes else []
+        
+        quiz_info = {
+            "quiz_id": quiz.quiz_id,
+            "title": quiz.title,
+            "due_date": quiz.due_date,
+            "time_limit": quiz.time_limit,
+            "question_count": quiz.question_count,
+            "class_ids": class_ids  # Danh sách class_id liên quan
+        }
+        quiz_list.append(quiz_info)
+    
+    # Trả về dữ liệu với phân trang
+    return paginate(quiz_list, params)
+
+# API endpoint for creating a quiz
+@app.post("/api/teacher/create/quiz")
+def create_quiz(quiz_data: QuizCreate, db: Session = Depends(get_db)):
+    # Kiểm tra xem teacher_id có tồn tại không
+    teacher_info = db.query(Teacher).filter(Teacher.teacher_id == quiz_data.teacher_id).first()
+    if not teacher_info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên")
+    # Tạo một quiz mới
+    new_quiz = Quiz(
+        title=quiz_data.title,
+        due_date=quiz_data.due_date,
+        time_limit=quiz_data.time_limit,
+        question_count=0,  # Ban đầu là 0, sẽ cập nhật sau khi thêm câu hỏi
+        teacher_id=quiz_data.teacher_id
+    )
+    db.add(new_quiz)
+    db.commit()
+    db.refresh(new_quiz)
+    return {
+        "message": "Tạo quiz thành công",
+        "quiz_id": new_quiz.quiz_id
+    }
+#API tạo câu hỏi
+@app.post("/api/quiz/{quiz_id}/create/questions")
+def create_questions_for_quiz(
+    quiz_id: str, 
+    question_data: QuestionCreate, 
+    db: Session = Depends(get_db)
+):
+    # Kiểm tra xem quiz có tồn tại không
+    quiz_info = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+    if not quiz_info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quiz")
+    # Tạo câu hỏi mới cho quiz
+    new_question = Questions(
+        quiz_id=quiz_id,
+        question_text=question_data.question_text
+    )
+    db.add(new_question)
+    db.commit()
+    db.refresh(new_question)
+    # Kiểm tra câu trả lời đúng
+    correct_answers = [ans for ans in question_data.answers if ans.is_correct]
+    if len(correct_answers) != 1:
+        raise HTTPException(status_code=400, detail="Mỗi câu hỏi phải có đúng một câu trả lời chính xác.")
+    # Tạo câu trả lời cho câu hỏi
+    for answer_data in question_data.answers:
+        new_answer = Answer(
+            question_id=new_question.question_id,
+            answer=answer_data.answer,
+            is_correct=answer_data.is_correct
+        )
+        db.add(new_answer)
+    db.commit()
+
+    # Cập nhật số lượng câu hỏi cho quiz
+    quiz_info.question_count += 1
+    db.commit()
+
+    return {
+        "message": "Tạo câu hỏi và câu trả lời thành công",
+        "question_id": new_question.question_id
+    }
 # Admin
 # API lấy toàn bộ thông tin học sinh
 @app.get("/api/admin/students", response_model=Page[dict])
@@ -427,8 +555,6 @@ def get_class_details(class_id: int, db: Session = Depends(get_db)):
         "students": student_data
     }
 # API thêm tài khoản học sinh mới
-
-
 @app.post("/api/admin/create/students")
 def create_student(
     student_data: StudentCreate,  # Nhận dữ liệu từ body
