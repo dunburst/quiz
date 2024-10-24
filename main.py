@@ -343,12 +343,43 @@ class AnswerCreate(BaseModel):
 class QuestionCreate(BaseModel):
     question_text: str
     answers: List[AnswerCreate]
+
+class ClassAssignment(BaseModel):
+    class_id: int  # ID của lớp mà quiz sẽ được giao
 class QuizCreate(BaseModel):
+
     title: str
     due_date: datetime
     time_limit: int
     teacher_id: str
-    questions: List[QuestionCreate]
+    class_assignments: List[ClassAssignment]  
+
+class AnswerUpdate(BaseModel):
+    answer: str
+    is_correct: bool
+class QuestionUpdate(BaseModel):
+    question_id: str
+    question_text: str
+    answers: List[AnswerUpdate]
+class UpdateQuestion(BaseModel):
+    question: List[QuestionUpdate]
+
+
+
+class AnswerResponse(BaseModel):
+    answer_id: str
+    answer: str
+    is_correct: bool
+
+class QuestionResponse(BaseModel):
+    question_id: str
+    question_text: str
+    answers: List[AnswerResponse]
+
+
+
+
+
 #API lấy thông tin bài tập của giáo viên 
 
 @app.get("/api/admin/quizzes", response_model=Page[dict])
@@ -369,13 +400,17 @@ def get_all_quizzes(db: Session = Depends(get_db), params: Params = Depends()):
         class_quizzes = db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz.quiz_id).all()
         class_ids = [class_quiz.class_id for class_quiz in class_quizzes] if class_quizzes else []
         
+        # Lấy tên lớp từ bảng class
+        class_names = db.query(Class.name_class).filter(Class.class_id.in_(class_ids)).all()
+        class_names_list = [class_name[0] for class_name in class_names]  # Chuyển đổi từ tuple sang danh sách
+        
         quiz_info = {
             "quiz_id": quiz.quiz_id,
             "title": quiz.title,
             "due_date": quiz.due_date,
             "time_limit": quiz.time_limit,
             "question_count": quiz.question_count,
-            "class_ids": class_ids  # Danh sách class_id liên quan
+            "class_ids": class_names_list  # Danh sách tên lớp liên quan
         }
         quiz_list.append(quiz_info)
     
@@ -389,6 +424,7 @@ def create_quiz(quiz_data: QuizCreate, db: Session = Depends(get_db)):
     teacher_info = db.query(Teacher).filter(Teacher.teacher_id == quiz_data.teacher_id).first()
     if not teacher_info:
         raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên")
+    
     # Tạo một quiz mới
     new_quiz = Quiz(
         title=quiz_data.title,
@@ -397,11 +433,31 @@ def create_quiz(quiz_data: QuizCreate, db: Session = Depends(get_db)):
         question_count=0,  # Ban đầu là 0, sẽ cập nhật sau khi thêm câu hỏi
         teacher_id=quiz_data.teacher_id
     )
+    
     db.add(new_quiz)
     db.commit()
     db.refresh(new_quiz)
+
+    # Giao bài cho từng lớp
+    for assignment in quiz_data.class_assignments:
+        # Kiểm tra xem lớp có tồn tại không
+        class_obj = db.query(Class).filter(Class.class_id == assignment.class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail=f"Lớp với ID {assignment.class_id} không tồn tại")
+
+        # Tạo bản ghi mới trong bảng class_quiz
+        new_class_quiz = Class_quiz(
+            class_quiz_id=str(uuid.uuid4()),  # Tạo ID duy nhất cho bản ghi
+            class_id=assignment.class_id,
+            quiz_id=new_quiz.quiz_id
+        )
+        
+        db.add(new_class_quiz)
+
+    db.commit()  # Lưu tất cả thay đổi
+
     return {
-        "message": "Tạo quiz thành công",
+        "message": "Tạo quiz và giao bài cho lớp thành công",
         "quiz_id": new_quiz.quiz_id
     }
 #API tạo câu hỏi
@@ -445,6 +501,108 @@ def create_questions_for_quiz(
         "message": "Tạo câu hỏi và câu trả lời thành công",
         "question_id": new_question.question_id
     }
+@app.put("/api/quiz/update-question/{quiz_id}")
+def update_question_for_quiz(
+    quiz_id: str,  # Nhận quiz_id từ đường dẫn
+    update_data: UpdateQuestion,  # Lấy toàn bộ dữ liệu từ body
+    db: Session = Depends(get_db)
+):
+    # Kiểm tra xem quiz có tồn tại không
+    quiz_info = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+    if not quiz_info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quiz")
+
+    # Duyệt qua từng câu hỏi để xử lý
+    for question_data in update_data.question:
+        # Kiểm tra xem câu hỏi có tồn tại không
+        question_info = db.query(Questions).filter(
+            Questions.question_id == question_data.question_id, 
+            Questions.quiz_id == quiz_id  # Sử dụng quiz_id từ URL
+        ).first()
+        if not question_info:
+            raise HTTPException(status_code=404, detail=f"Câu hỏi {question_data.question_id} không tồn tại.")
+
+        # Cập nhật nội dung câu hỏi
+        question_info.question_text = question_data.question_text
+
+        # Kiểm tra xem câu trả lời đúng có chính xác một đáp án không
+        correct_answers = [ans for ans in question_data.answers if ans.is_correct]
+        if len(correct_answers) != 1:
+            raise HTTPException(status_code=400, detail=f"Câu hỏi {question_data.question_id} phải có đúng một câu trả lời chính xác.")
+
+        # Xóa tất cả câu trả lời cũ của câu hỏi
+        db.query(Answer).filter(Answer.question_id == question_data.question_id).delete()
+        db.commit()
+
+        # Thêm các câu trả lời mới cho câu hỏi
+        for answer_data in question_data.answers:
+            new_answer = Answer(
+                question_id=question_data.question_id,
+                answer=answer_data.answer,
+                is_correct=answer_data.is_correct
+            )
+            db.add(new_answer)
+        
+        db.commit()  # Chỉ cần commit sau khi thêm tất cả câu trả lời cho câu hỏi
+
+    return {
+        "message": "Cập nhật câu hỏi và câu trả lời thành công"
+    }
+#API lấy question trong quiz
+@app.get("/api/quiz/{quiz_id}/questions", response_model=List[QuestionResponse])
+def get_questions_for_quiz(quiz_id: str, db: Session = Depends(get_db)):
+    # Kiểm tra xem quiz có tồn tại không
+    quiz_info = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+    if not quiz_info:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quiz")
+
+    # Lấy tất cả câu hỏi liên quan đến quiz
+    questions = db.query(Questions).filter(Questions.quiz_id == quiz_id).all()
+    if not questions:
+        return []  # Nếu không có câu hỏi nào, trả về danh sách trống
+
+    # Tạo danh sách câu hỏi và câu trả lời
+    question_responses = []
+    for question in questions:
+        answers = db.query(Answer).filter(Answer.question_id == question.question_id).all()
+        answer_data = [
+            {
+                "answer_id": answer.answer_id,
+                "answer": answer.answer,
+                "is_correct": answer.is_correct,
+            } for answer in answers
+        ]
+        
+        question_responses.append({
+            "question_id": question.question_id,
+            "question_text": question.question_text,
+            "answers": answer_data,
+        })
+
+    return question_responses
+
+# class UpdateClassQuizRequest(BaseModel):
+#     class_id: int
+# @app.put("/api/admin/class_quiz/{quiz_id}")
+# def update_class_for_quiz(quiz_id: str, update_class_quiz_request: UpdateClassQuizRequest, db: Session = Depends(get_db)):
+#     # Kiểm tra xem bản ghi class_quiz có tồn tại không
+#     class_quiz_record = db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz_id).first()
+    
+#     if not class_quiz_record:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bản ghi không tồn tại")
+
+#     # Cập nhật class_id
+#     class_quiz_record.class_id = update_class_quiz_request.class_id
+#     db.commit()
+
+#     return {
+#         "message": "Cập nhật lớp thành công",
+#         "quiz_id": quiz_id,
+#         "new_class_id": update_class_quiz_request.class_id
+#     }
+
+
+
 # Admin
 # API lấy toàn bộ thông tin học sinh
 @app.get("/api/admin/students", response_model=Page[dict])
