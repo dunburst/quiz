@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker, Session
 import uuid
 from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from fastapi_pagination import Page, Params, paginate
 from sqlalchemy.exc import IntegrityError
@@ -107,9 +107,11 @@ class Answer(Base):
     is_correct = Column(Boolean, default=True)
 class Score(Base):
     __tablename__ = 'score'
+    
     score_id = Column(String(36), primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey('student.student_id'))
-    quiz_id = Column(Integer, ForeignKey('quiz.quiz_id'))
+    student_id = Column(String(36), ForeignKey('student.student_id'))  # student_id là String
+    quiz_id = Column(String(36), ForeignKey('quiz.quiz_id'))  # quiz_id là String
+    score = Column(Float)
     time_start = Column(DateTime)
     time_end = Column(DateTime)
     status = Column(String)
@@ -138,6 +140,11 @@ def update_total_students(class_id: int, db: Session):
 class LoginRequest(BaseModel):
     user_id: str
     password: str
+
+class ChangePasswordRequest(BaseModel):
+    student_id: str = Field(..., title="ID của học sinh")
+    new_password: str = Field(..., title="Mật khẩu mới")
+    confirm_password: str = Field(..., title="Xác nhận mật khẩu mới")
 
 class TeacherCreate(BaseModel):
     teacher_id: str
@@ -202,16 +209,20 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy thông tin người dùng")
 # API đổi mật khẩu cho học sinh lần đầu đăng nhập
 @app.post("/api/change-password")
-def change_password(student_id: str, new_password: str, confirm_password: str, db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.student_id == student_id).first()
+def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db)):
+    # Sử dụng request.student_id, request.new_password, request.confirm_password
+    student = db.query(Student).filter(Student.student_id == request.student_id).first()
+    
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Học sinh không tồn tại")
     
-    if new_password != confirm_password:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mật khẩu xác nhận không đúng")
-    Student.first_login = False  # Đặt lại `first_login` thành False sau khi đổi mật khẩu
-    student.password = new_password  # Lưu mật khẩu trực tiếp
+    if request.new_password != request.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu xác nhận không đúng")
+
+    student.first_login = False  # Đặt lại `first_login` thành False sau khi đổi mật khẩu
+    student.password = request.new_password  # Lưu mật khẩu trực tiếp
     db.commit()
+    
     return {"message": "Đổi mật khẩu thành công"}
 
 # Student
@@ -252,24 +263,35 @@ def get_student_class_subject_teacher(student_id: str, db: Session = Depends(get
         "class": class_info_data,
         "subjects": subjects_data
     }
+
 # API lấy thông tin các bài làm của sinh viên
 @app.get("/quizzes/{student_id}")
-def get_quizzes(student_id: int, db: Session = Depends(get_db)):
+def get_quizzes(student_id: str, db: Session = Depends(get_db)):  # Đổi student_id thành string
     # Lấy thông tin học sinh, bao gồm cả class_id của học sinh đó
-    student = db.query(Student).filter(Student.student_id == student_id).first()
+    student = db.query(Student).filter(Student.student_id == student_id).first()  # Sử dụng student_id là String
     if not student:
         raise HTTPException(status_code=404, detail="Không tìm thấy học sinh")
+    
     # Lấy tất cả các quiz được phân cho lớp của học sinh
     class_quiz_ids = db.query(Class_quiz.quiz_id).filter(Class_quiz.class_id == student.class_id).subquery()
-    # Lấy các quiz từ bảng Quiz và đối chiếu với bảng Grade (nếu có)
-    quizzes = db.query(Quiz, Grade).join(Grade, Quiz.quiz_id == Grade.quiz_id).filter(
-        Grade.student_id == student_id, Quiz.quiz_id.in_(class_quiz_ids)).all()
+    
+    # Lấy các quiz từ bảng Quiz và đối chiếu với bảng Score
+    quizzes = db.query(Quiz).filter(Quiz.quiz_id.in_(class_quiz_ids)).all()
+    
+    # Lấy điểm cho học sinh từ bảng Score
+    scores = db.query(Score).filter(Score.student_id == student_id).all()
+    
+    # Tạo từ điển để ánh xạ quiz_id với score
+    score_dict = {score.quiz_id: score.score for score in scores}
 
     # Kiểm tra xem có quiz nào không
     if not quizzes:
         raise HTTPException(status_code=404, detail="Chưa có bài quiz nào cho học sinh này")
+    
     result = []
-    for quiz, grade in quizzes:
+    for quiz in quizzes:
+        # Lấy điểm tương ứng từ từ điển
+        quiz_score = score_dict.get(quiz.quiz_id, None)
         status = "Còn hạn" if quiz.due_date > datetime.now() else "Hết hạn"
         result.append({
             "status": status,
@@ -277,8 +299,9 @@ def get_quizzes(student_id: int, db: Session = Depends(get_db)):
             "due_date": quiz.due_date.strftime("%d/%m/%Y"),
             "time_limit": f"{quiz.time_limit} phút",
             "question_count": quiz.question_count,
-            "score": grade.score if grade.score else None
+            "score": quiz_score  # Sử dụng điểm từ từ điển
         })
+    
     return result
 # Teacher
 # API lấy thông tin các lớp học mà giáo viên phụ trách dựa trên teacher_id
