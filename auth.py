@@ -77,7 +77,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     teacher = db.query(Teacher).filter(Teacher.mateacher == form_data.username).first()
     if teacher and verify_password(form_data.password, teacher.password):
         access_token = create_access_token(data={"sub": teacher.teacher_id}, role="teacher")
-        return {"access_token": access_token, "token_type": "bearer", "role": "teacher", "first_login": teacher.first_login}
+        return {"access_token": access_token, "token_type": "bearer", "role": "teacher"}
     # Kiểm tra quản trị viên
     admin = db.query(Admin).filter(Admin.admin_id == form_data.username).first()
     if admin and verify_password(form_data.password, admin.password):
@@ -89,21 +89,22 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         detail="Invalid credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
+class ChangeRespone(BaseModel):
+    new_password: str
+    confirm_password: str
 @router.post("/api/change-password")
 def change_password(
-    new_password: str,
-    confirm_password: str,
+    request: ChangeRespone,
     db: Session = Depends(get_db),
     current_user: Union[Student, Teacher] = Depends(get_current_user)
 ):
     if not isinstance(current_user, (Student, Teacher)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh hoặc giáo viên mới có thể thay đổi mật khẩu")
-    if new_password != confirm_password:
+    if request.new_password != request.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu xác nhận không đúng")
     if current_user.first_login is False:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Người dùng này đã thay đổi mật khẩu rồi")
-    current_user.password = hash_password(new_password)
+    current_user.password = hash_password(request.new_password)
     current_user.first_login = False
     db.commit()
     return {"message": "Đổi mật khẩu thành công"}

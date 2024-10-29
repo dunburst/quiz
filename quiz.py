@@ -22,7 +22,6 @@ class QuizCreate(BaseModel):
     title: str
     due_date: datetime
     time_limit: int
-    teacher_id: str
     class_assignments: List[ClassAssignment]  
 class AnswerUpdate(BaseModel):
     answer: str
