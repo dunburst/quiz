@@ -18,6 +18,7 @@ def update_total_students(class_id: int, db: Session):
         class_obj.total_student = total_students
         db.commit()
 # Lấy thông tin học sinh
+# Define StudentResponse model to include 'name_class'
 class StudentResponse(BaseModel):
     student_id: str
     mastudent: str
@@ -28,17 +29,43 @@ class StudentResponse(BaseModel):
     phone_number: str
     image: str
     class_id: int
+    name_class: str  # New field for class name
     first_login: bool
+
+# API route to retrieve all students
 @router.get("/api/students", response_model=Page[StudentResponse], tags=["Students"])
 def get_all_students(
-    params: Params = Depends(),  
-    db: Session = Depends(get_db), 
+    params: Params = Depends(),
+    db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
+    # Fetch all students and their respective classes
     students = db.query(Student).all()
-    return paginate(students, params)
+    # Check if no students are found
+    if not students:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found")
+    # Compile list with student and class information
+    student_list = []
+    for student in students:
+        classe = db.query(Class).filter(Class.class_id == student.class_id).first()
+        student_info = {
+            "student_id": student.student_id,
+            "mastudent": student.mastudent,
+            "gender": student.gender,
+            "name": student.name,
+            "birth_date": student.birth_date,
+            "email": student.email,
+            "phone_number": student.phone_number,
+            "image": student.image,
+            "class_id": student.class_id,
+            "name_class": classe.name_class if classe else "Unknown",
+            "first_login": student.first_login
+        }
+        student_list.append(student_info)
+    # Paginate and return the response
+    return paginate(student_list, params)
 
 # Thêm học sinh
 class StudentCreate(BaseModel):

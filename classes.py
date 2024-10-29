@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List,  Optional
 from pydantic import BaseModel
 from database import get_db
-from models import Student, Class, Grades, Admin, Teacher, Distribution
+from models import Student, Class, Grades, Admin, Teacher, Distribution, Subject
 from auth import hash_password, get_current_user
 import uuid
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +50,7 @@ def get_class_details(class_id: int, db: Session = Depends(get_db), current_user
     student_data = []
     for student in students:
         student_data.append({
-            "student_id": student.student_id,
+            "student_id": student.mastudent,
             "name": student.name,
             "gender": student.gender,
             "birth_date": student.birth_date,
@@ -63,7 +63,7 @@ def get_class_details(class_id: int, db: Session = Depends(get_db), current_user
         if teacher:
             subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
             teacher_data.append({
-                "teacher_id": teacher.teacher_id,
+                "teacher_id": teacher.mateacher,
                 "name": teacher.name,
                 "gender": teacher.gender,
                 "birth_date": teacher.birth_date,

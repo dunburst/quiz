@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Union
 from pydantic import BaseModel
 from database import get_db
 from models import Teacher, Subject, Admin, Class, Distribution
@@ -22,17 +22,51 @@ class TeacherResponse(BaseModel):
     email: str
     phone_number: Optional[str]
     image: Optional[str]
-    subject_id: int
+    subject: str  # New field for subject name
+    classes: List[Dict[str, Union[str, int]]]  # Allow class_id to be str or int
+# API route to retrieve all teachers with their subject and class information
 @router.get("/api/teachers", response_model=Page[TeacherResponse], tags=["Teachers"])
 def get_all_teachers(
     params: Params = Depends(),
-    db: Session = Depends(get_db), 
+    db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
+    # Fetch all teachers
     teachers = db.query(Teacher).all()
-    return paginate(teachers, params) 
+    # Check if no teachers are found
+    if not teachers:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No teachers found")
+    teacher_data = []
+    for teacher in teachers:
+        # Retrieve subject name
+        subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+        # Retrieve class information for each teacher
+        distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
+        class_info = []
+        for distribution in distributions:
+            class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
+            if class_data:
+                class_info.append({
+                    "class_id": class_data.class_id,
+                    "name_class": class_data.name_class
+                })
+        # Append teacher data including subject and classes
+        teacher_data.append({
+            "teacher_id": teacher.teacher_id,
+            "mateacher": teacher.mateacher,
+            "gender": teacher.gender,
+            "name": teacher.name,
+            "birth_date": teacher.birth_date,
+            "email": teacher.email,
+            "phone_number": teacher.phone_number,
+            "image": teacher.image,
+            "subject": subject.name_subject if subject else "Unknown",
+            "classes": class_info
+        })
+    # Paginate and return the response
+    return paginate(teacher_data, params)
 
 # Thêm giáo viên
 class TeacherCreate(BaseModel):
@@ -178,22 +212,40 @@ def search_teachers(
 ):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
+    
+    # Tìm kiếm giáo viên theo tên
     teachers = db.query(Teacher).filter(Teacher.name.ilike(f"%{name}%")).all()
     if not teachers:
-        raise HTTPException(status_code=404, detail="Không tìm thấy học sinh nào")
+        raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên nào")
+    
     teacher_data = []
     for teacher in teachers:
-        classe = db.query(Class).filter(Class.class_id == teacher.class_id).first()
+        # Lấy thông tin về môn học
+        subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+        
+        # Lấy thông tin về lớp
+        distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
+        class_info = []
+        for distribution in distributions:
+            class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
+            if class_data:
+                class_info.append({
+                    "class_id": class_data.class_id,  # Giữ nguyên kiểu dữ liệu class_id
+                    "name_class": class_data.name_class
+                })
+        
         teacher_info = {
+            "teacher_id": teacher.teacher_id,  # Thêm trường teacher_id
             "mateacher": teacher.mateacher,
-            "name": teacher.name,
             "gender": teacher.gender,
+            "name": teacher.name,
             "birth_date": teacher.birth_date,
             "email": teacher.email,
             "phone_number": teacher.phone_number,
+            "image": teacher.image,
             "subject": subject.name_subject if subject else "Không rõ",
             "classes": class_info
         }
         teacher_data.append(teacher_info)
-    return paginate(teacher_data, params)
 
+    return paginate(teacher_data, params)
