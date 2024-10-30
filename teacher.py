@@ -249,3 +249,42 @@ def search_teachers(
         teacher_data.append(teacher_info)
 
     return paginate(teacher_data, params)
+
+# Lớp để định nghĩa dữ liệu trả về cho các lớp mà giáo viên dạy
+class ClassAssignment(BaseModel):
+    class_id: int
+    name_class: str
+
+# API route để lấy thông tin các lớp mà giáo viên dạy
+@router.get("/api/teachers/class", response_model=List[ClassAssignment], tags=["Teachers"])
+def get_my_class_assignments(
+    current_user: Teacher = Depends(get_current_user),  # Giả định Teacher là kiểu dữ liệu cho người dùng
+    db: Session = Depends(get_db)
+):
+    # Lấy danh sách phân công lớp của giáo viên hiện tại
+    class_assignments = (
+        db.query(Distribution)
+        .filter(Distribution.teacher_id == current_user.teacher_id)
+        .all()
+    )
+
+    if not class_assignments:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phân công lớp cho giáo viên")
+
+    # Lấy thông tin chi tiết lớp
+    class_ids = [assignment.class_id for assignment in class_assignments]
+    classes = (
+        db.query(Class)
+        .filter(Class.class_id.in_(class_ids))
+        .all()
+    )
+
+    # Tạo danh sách các lớp đã được phân công
+    class_assignment_list = [
+        ClassAssignment(
+            class_id=_class.class_id,
+            name_class=_class.name_class  # Thay đổi nếu cần tên lớp từ model Class
+        ) for _class in classes
+    ]
+
+    return class_assignment_list
