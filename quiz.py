@@ -22,6 +22,7 @@ class QuizCreate(BaseModel):
     title: str
     due_date: datetime
     time_limit: int
+    question_count: int
     class_assignments: List[ClassAssignment]  
 class AnswerUpdate(BaseModel):
     answer: str
@@ -87,7 +88,7 @@ def create_quiz(
         title=quiz_data.title,
         due_date=quiz_data.due_date,
         time_limit=quiz_data.time_limit,
-        question_count=0,  
+        question_count=quiz_data.question_count,  
         teacher_id=current_user.teacher_id
     )
     db.add(new_quiz)
