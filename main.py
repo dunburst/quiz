@@ -5,6 +5,7 @@ from student import router as student_router
 from teacher import router as teacher_router
 from classes import router as class_router
 from quiz import router as quiz_router
+from feedback import router as feedback_router
 from database import Base, engine
 import uvicorn
 
@@ -26,5 +27,6 @@ app.include_router(student_router)
 app.include_router(teacher_router)
 app.include_router(class_router)
 app.include_router(quiz_router)
+app.include_router(feedback_router)
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

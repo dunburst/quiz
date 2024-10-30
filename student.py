@@ -179,7 +179,7 @@ def search_students(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
     students = db.query(Student).filter(Student.name.ilike(f"%{name}%")).all()
     if not students:
-        raise HTTPException(status_code=404, detail="Không tìm thấy học sinh nào")
+        raise HTTPException(status_code=200, detail="Không tìm thấy học sinh nào")
     student_data = []
     for student in students:
         classe = db.query(Class).filter(Class.class_id == student.class_id).first()
