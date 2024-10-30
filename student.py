@@ -234,52 +234,52 @@ def get_student_class_subject_teacher(
         "subjects": subjects_data
     }
     
-@router.get("/api/quizzes", tags=["Students"])
-def get_quizzes(
+@router.get("/api/quizzes/{subject_id}", tags=["Students"])
+def get_quizzes_by_subject(
+    subject_id: int,
     db: Session = Depends(get_db),
     current_user: Student = Depends(get_current_user)
 ):
+    # Kiểm tra nếu người dùng không phải là học sinh
     if not isinstance(current_user, Student):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can access their quizzes.")
-    
-    # Lấy các quiz dựa vào class_id của sinh viên
+
+    # Lấy danh sách quiz cho lớp học của học sinh
     class_quiz_ids = db.query(Class_quiz.quiz_id).filter(Class_quiz.class_id == current_user.class_id).subquery()
-    quizzes = db.query(Quiz).filter(Quiz.quiz_id.in_(class_quiz_ids)).all()
     
-    # Lấy điểm của sinh viên
+    # Lấy các quiz thuộc subject_id và nằm trong lớp của học sinh
+    quizzes = db.query(Quiz).join(Teacher, Quiz.teacher_id == Teacher.teacher_id) \
+                .filter(Teacher.subject_id == subject_id, Quiz.quiz_id.in_(class_quiz_ids)) \
+                .all()
+    
+    # Lấy điểm của học sinh cho các quiz này
     scores = db.query(Score).filter(Score.student_id == current_user.student_id).all()
     score_dict = {score.quiz_id: score.score for score in scores}
-
+    
     if not quizzes:
-        raise HTTPException(status_code=404, detail="No quizzes available for this student.")
+        raise HTTPException(status_code=404, detail="No quizzes available for this subject and student class.")
 
-    # Nhóm quiz theo subject_id
-    grouped_quizzes = defaultdict(list)
-
+    # Chuẩn bị danh sách chi tiết cho từng quiz
+    quiz_details = []
     for quiz in quizzes:
-        # Lấy thông tin giáo viên
-        teacher = db.query(Teacher).filter(Teacher.teacher_id == quiz.teacher_id).first()
-        subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first() if teacher else None
-        
+        # Xác định trạng thái và lấy điểm của quiz
         quiz_score = score_dict.get(quiz.quiz_id, None)
         status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
 
-        subject_id = subject.subject_id if subject else None
-        subject_name = subject.name_subject if subject else "Unknown"
-
-        grouped_quizzes[subject_id].append({
-            "status": status,
+        quiz_details.append({
+            "quiz_id": quiz.quiz_id,
             "title": quiz.title,
             "due_date": quiz.due_date.strftime("%d/%m/%Y"),
             "time_limit": f"{quiz.time_limit} minutes",
             "question_count": quiz.question_count,
+            "status": status,
             "score": quiz_score,
-            "teacher_id": teacher.teacher_id if teacher else None,
+            "teacher_id": quiz.teacher_id
         })
-    
-    # Chuyển đổi nhóm quiz thành danh sách
-    result = [{"subject_id": key, "subject_name": subject_name, "quizzes": value} for key, value in grouped_quizzes.items()]
 
-    return result
-
+    return {
+        "subject_id": subject_id,
+        "subject_name": db.query(Subject.name_subject).filter(Subject.subject_id == subject_id).scalar(),
+        "quizzes": quiz_details
+    }
 
