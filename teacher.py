@@ -216,8 +216,7 @@ def search_teachers(
     # Tìm kiếm giáo viên theo tên
     teachers = db.query(Teacher).filter(Teacher.name.ilike(f"%{name}%")).all()
     if not teachers:
-        raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên nào")
-    
+        raise HTTPException(status_code=200, detail="Không tìm thấy giáo viên nào")
     teacher_data = []
     for teacher in teachers:
         # Lấy thông tin về môn học

@@ -72,37 +72,23 @@ def add_feedback(feedback: FeedbackCreate, db: Session = Depends(get_db), curren
     db.refresh(new_feedback)
     return new_feedback
 
-@router.get("/api/feedback", response_model=List[FeedbackResponse], tags=["Feedbacks"])
+@router.get("/api/feedback", response_model=List[FeedbackResponse])
 def get_feedback(class_id: int, subject_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    if isinstance(current_user, Teacher):
-        is_assigned = db.query(Distribution).filter(
-            Distribution.class_id == class_id,
-            Distribution.teacher_id == current_user.teacher_id,
-            Teacher.subject_id == subject_id
-        ).join(Teacher, Teacher.teacher_id == Distribution.teacher_id).first()
-
-        if not is_assigned:
-            raise HTTPException(status_code=403, detail="Access denied: Not assigned to this class and subject.")
-    
-    elif isinstance(current_user, Student):
-        student = db.query(Student).filter(
-            Student.student_id == current_user.student_id,
-            Student.class_id == class_id
-        ).first()
-
+    # Check the user's role to allow access
+    if isinstance(current_user, Student):
+        student = db.query(Student).filter(Student.student_id == current_user.student_id, Student.class_id == class_id).first()
         if not student:
-            raise HTTPException(status_code=403, detail="Access denied: Not enrolled in this class.")
+            raise HTTPException(status_code=403, detail="Không có quyền xem feedback của lớp này")
     
-    parent_feedbacks = db.query(Feedback).filter(
+    # Fetch feedback
+    feedbacks = db.query(Feedback).filter(
         Feedback.class_id == class_id,
         Feedback.subject_id == subject_id,
-        Feedback.is_parents == 0
+        Feedback.is_parents == 0  # Parent feedback
     ).all()
 
-    feedbacks = []
-    for parent in parent_feedbacks:
-        feedbacks.append(parent)
-        child_feedbacks = db.query(Feedback).filter(Feedback.parent_id == parent.feedback_id).all()
-        feedbacks.extend(child_feedbacks)
-    
+    # Handle the case if there is no feedback found
+    if not feedbacks:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phản hồi nào")
+
     return feedbacks

@@ -2,6 +2,7 @@ from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, V
 from database import Base
 import uuid
 from datetime import datetime
+from sqlalchemy.orm import relationship
 
 class Admin(Base):
     __tablename__ = "admin"
