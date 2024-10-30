@@ -9,13 +9,9 @@ from pydantic import BaseModel
 from passlib.context import CryptContext
 from typing import Optional, Union
 import uuid
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
-
-SECRET_KEY = "asdfghjklzxcvbnm197534534huihweirh32u3h4iehrkwjhr938293ieqwkjrhdfgskdbcnxmsfsejrosastring"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
