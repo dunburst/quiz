@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from database import get_db
-from models import Teacher, Subject, Admin, Class, Distribution, Quiz, Class_quiz, Questions, Answer, Student, Choice
+from models import Teacher, Subject, Admin, Class, Distribution, Quiz, Class_quiz, Questions, Answer, Student, Choice, Score
 from auth import hash_password, get_current_user
 import uuid
 from sqlalchemy.exc import IntegrityError
@@ -299,7 +299,7 @@ def submit_quiz(
 class QuestionReview(BaseModel):
     question_id: str
     question_text: str
-    student_answer: Optional[str]  # Answer text or None if not answered
+    student_answer: Optional[str]  
     correct_answer: str
     is_correct: bool  
 class QuizReviewResponse(BaseModel):
@@ -313,38 +313,30 @@ def review_quiz(
     current_user: Student = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Check if the quiz exists
     quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
-    # Retrieve the student's score for the quiz
     student_score = db.query(Score).filter(
         Score.student_id == current_user.student_id, Score.quiz_id == quiz_id
     ).first()
     if not student_score:
         raise HTTPException(status_code=403, detail="No record of this quiz for the student")
-    # Retrieve all questions for the quiz
     questions = db.query(Questions).filter(Questions.quiz_id == quiz_id).all()
-    # Fetch the student's chosen answers
     student_choices = db.query(Choice.answer_id, Answer.question_id).join(Answer).filter(
         Choice.student_id == current_user.student_id,
         Answer.question_id.in_([q.question_id for q in questions])
     ).all()
     student_answer_map = {choice.question_id: choice.answer_id for choice in student_choices}
-    # Construct the response with question details and correct answers
     questions_review = []
     for question in questions:
-        # Fetch the correct answer for each question
         correct_answer = db.query(Answer).filter(
             Answer.question_id == question.question_id,
             Answer.is_correct == True
         ).first()
-        # Fetch student's chosen answer text if they answered the question
         student_answer_id = student_answer_map.get(question.question_id)
         student_answer = db.query(Answer).filter(
             Answer.answer_id == student_answer_id
         ).first() if student_answer_id else None 
-        # Check if the student's answer was correct
         is_correct = student_answer_id == correct_answer.answer_id if student_answer else False
         questions_review.append(QuestionReview(
             question_id=question.question_id,
@@ -353,10 +345,45 @@ def review_quiz(
             correct_answer=correct_answer.answer,
             is_correct=is_correct
         ))
-    # Return the review data
     return QuizReviewResponse(
         quiz_id=quiz.quiz_id,
         title=quiz.title,
         score=student_score.score,
         questions=questions_review
+    )
+class QuizDetailResponse1(BaseModel):
+    quiz_id: str
+    title: str
+    time_limit: int
+    questions: List[QuestionResponse]
+#API lấy thông tin chi tiết về các question
+@router.get("/api/quiz1/{quiz_id}", response_model=QuizDetailResponse1, tags=["Students"])
+def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
+    # Lấy thông tin quiz
+    quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+    # Lấy các câu hỏi thuộc về quiz
+    questions = db.query(Questions).filter(Questions.quiz_id == quiz_id).all()
+    # Tạo danh sách câu hỏi và câu trả lời tương ứng
+    question_responses = []
+    for question in questions:
+        answers = db.query(Answer).filter(Answer.question_id == question.question_id).all()
+        answer_responses = [
+            AnswerResponse(
+                answer_id=answer.answer_id,
+                answer=answer.answer,
+                is_correct=answer.is_correct
+            )
+            for answer in answers
+        ]
+        question_responses.append(QuestionResponse(
+            question_id=question.question_id,
+            question_text=question.question_text,
+            answers=answer_responses
+        ))
+    # Tạo và trả về thông tin quiz chi tiết
+    return QuizDetailResponse1(
+        quiz_id=quiz.quiz_id,
+        title=quiz.title, 
+        time_limit= quiz.time_limit,
+        questions=question_responses
     )

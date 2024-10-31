@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
+from quiz import AnswerResponse, QuestionResponse, QuizDetailResponse
 from collections import defaultdict
 router = APIRouter()
 def update_total_students(class_id: int, db: Session):
@@ -283,3 +284,4 @@ def get_quizzes_by_subject(
         "quizzes": quiz_details
     }
 
+#
