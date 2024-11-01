@@ -267,6 +267,17 @@ def get_quizzes_by_subject(
         quiz_score = score_dict.get(quiz.quiz_id, None)
         status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
 
+        # Nếu bài kiểm tra đã hết hạn và chưa có điểm, lưu điểm là 0
+        if status == "Expired" and quiz_score is None:
+            quiz_score = 0
+            new_score = Score(
+                student_id=current_user.student_id,
+                quiz_id=quiz.quiz_id,
+                score=quiz_score
+            )
+            db.add(new_score)
+            db.commit()  # Lưu điểm 0 vào cơ sở dữ liệu
+
         quiz_details.append({
             "quiz_id": quiz.quiz_id,
             "title": quiz.title,
@@ -283,5 +294,3 @@ def get_quizzes_by_subject(
         "subject_name": db.query(Subject.name_subject).filter(Subject.subject_id == subject_id).scalar(),
         "quizzes": quiz_details
     }
-
-#

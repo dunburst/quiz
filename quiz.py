@@ -299,9 +299,9 @@ def submit_quiz(
 class QuestionReview(BaseModel):
     question_id: str
     question_text: str
-    student_answer: Optional[str]  
+    student_answer: Optional[str]  # Answer text or None if not answered
     correct_answer: str
-    is_correct: bool  
+    correct: bool  
 class QuizReviewResponse(BaseModel):
     quiz_id: str
     title: str
@@ -313,6 +313,7 @@ def review_quiz(
     current_user: Student = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Check if the quiz exists
     quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
@@ -343,7 +344,7 @@ def review_quiz(
             question_text=question.question_text,
             student_answer=student_answer.answer if student_answer else None,
             correct_answer=correct_answer.answer,
-            is_correct=is_correct
+            correct=is_correct
         ))
     return QuizReviewResponse(
         quiz_id=quiz.quiz_id,
