@@ -287,3 +287,25 @@ def get_my_class_assignments(
     ]
 
     return class_assignment_list
+
+@router.get("/api/teacher/classes", tags=["Classes"])
+def get_classes_for_teacher(db: Session = Depends(get_db), current_user: Teacher = Depends(get_current_user)):
+    if not isinstance(current_user, Teacher):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teachers can access this resource")
+
+    # Lấy tất cả các lớp học mà giáo viên có thể dạy
+    classes = db.query(Class).all()
+    if not classes:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lớp nào")
+
+    class_data = []
+    for classe in classes:
+        class_data.append({
+            "class_id": classe.class_id,
+            "name_class": classe.name_class,
+            "total_student": classe.total_student
+        })
+
+    return {
+        "classes": class_data
+    }

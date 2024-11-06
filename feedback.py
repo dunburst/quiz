@@ -36,7 +36,7 @@ class FeedbackResponse(BaseModel):
     created_at: datetime
     replies: List[FeedbackReply] = []  # Danh sách phản hồi con
 
-@router.get("/api/feedback/", response_model=List[FeedbackResponse], tags=["Feedback"])
+@router.get("/api/feedback", response_model=List[FeedbackResponse], tags=["Feedback"])
 def get_feedback(
     class_id: int,
     subject_id: int,
@@ -101,7 +101,7 @@ class FeedbackCreate(BaseModel):
     class_id: int
     parent_id: Optional[str] = None
 
-@router.post("/api/post/feedback/", response_model=FeedbackResponse, tags=["Feedback"])
+@router.post("/api/post/feedback", response_model=FeedbackResponse, tags=["Feedback"])
 def create_feedback(
     feedback: FeedbackCreate,
     db: Session = Depends(get_db),

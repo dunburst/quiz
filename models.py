@@ -69,6 +69,7 @@ class Quiz(Base):
     time_limit = Column(Integer)
     question_count = Column(Integer)
     teacher_id = Column(String(36), ForeignKey('teacher.teacher_id'))
+    
 
 class Questions(Base):
     __tablename__ = 'questions'

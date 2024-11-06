@@ -234,17 +234,34 @@ def get_student_class_subject_teacher(
         "class": class_info_data,
         "subjects": subjects_data
     }
-    
-@router.get("/api/quizzes/{subject_id}", tags=["Students"])
+
+
+class QuizResponse(BaseModel):
+    quiz_id: str  
+    title: str
+    due_date: datetime  
+    time_limit: int
+    question_count: int
+    status: str
+    score: Optional[float]  # Có thể là None nếu chưa có điểm
+    teacher_id: str  # Thay đổi theo kiểu dữ liệu thực tế nếu cần
+
+class SubjectQuizzesResponse(BaseModel):
+    subject_id: int
+    subject_name: str
+    quizzes: List[QuizResponse]
+
+@router.get("/api/quizzes/{subject_id}", response_model=Page[dict], tags=["Students"])
 def get_quizzes_by_subject(
     subject_id: int,
+    params: Params = Depends(),
     db: Session = Depends(get_db),
     current_user: Student = Depends(get_current_user)
 ):
     # Kiểm tra nếu người dùng không phải là học sinh
     if not isinstance(current_user, Student):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can access their quizzes.")
-
+    
     # Lấy danh sách quiz cho lớp học của học sinh
     class_quiz_ids = db.query(Class_quiz.quiz_id).filter(Class_quiz.class_id == current_user.class_id).subquery()
     
@@ -259,15 +276,13 @@ def get_quizzes_by_subject(
     
     if not quizzes:
         raise HTTPException(status_code=404, detail="No quizzes available for this subject and student class.")
-
+    
     # Chuẩn bị danh sách chi tiết cho từng quiz
     quiz_details = []
     for quiz in quizzes:
-        # Xác định trạng thái và lấy điểm của quiz
         quiz_score = score_dict.get(quiz.quiz_id, None)
         status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
 
-        # Nếu bài kiểm tra đã hết hạn và chưa có điểm, lưu điểm là 0
         if status == "Expired" and quiz_score is None:
             quiz_score = 0
             new_score = Score(
@@ -276,21 +291,65 @@ def get_quizzes_by_subject(
                 score=quiz_score
             )
             db.add(new_score)
-            db.commit()  # Lưu điểm 0 vào cơ sở dữ liệu
+            db.commit()
 
-        quiz_details.append({
+        quiz_info = {
             "quiz_id": quiz.quiz_id,
             "title": quiz.title,
-            "due_date": quiz.due_date.strftime("%d/%m/%Y"),
-            "time_limit": f"{quiz.time_limit} minutes",
+            "due_date": quiz.due_date,
+            "time_limit": quiz.time_limit,
             "question_count": quiz.question_count,
             "status": status,
             "score": quiz_score,
             "teacher_id": quiz.teacher_id
-        })
+        }
+        quiz_details.append(quiz_info)
 
-    return {
-        "subject_id": subject_id,
-        "subject_name": db.query(Subject.name_subject).filter(Subject.subject_id == subject_id).scalar(),
-        "quizzes": quiz_details
-    }
+    # Paginate và trả về danh sách quiz
+    return paginate(quiz_details, params)
+
+class StudentScoreResponse(BaseModel):
+    student_id: str
+    student_name: str
+    scores: dict  # Dạng {quiz_title: score}
+
+# API to get students and scores by class_id
+@router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Classes"])
+def get_class_students_scores(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    # Xác nhận người dùng có quyền truy cập
+    if not isinstance(current_user, Teacher):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teacher can access this resource")
+
+    # Kiểm tra nếu lớp tồn tại
+    class_obj = db.query(Class).filter(Class.class_id == class_id).first()
+    if not class_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+
+    # Lấy danh sách học sinh trong lớp
+    students = db.query(Student).filter(Student.class_id == class_id).all()
+    if not students:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found in this class")
+
+    # Lấy danh sách các quiz của lớp
+    quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id).all()
+    quiz_titles = {quiz.quiz_id: quiz.title for quiz in quizzes}
+
+    # Tạo kết quả cho từng học sinh
+    student_scores = []
+    for student in students:
+        # Lấy điểm của học sinh cho các quiz
+        scores = db.query(Score).filter(Score.student_id == student.student_id, Score.quiz_id.in_(quiz_titles.keys())).all()
+        score_dict = {quiz_titles[score.quiz_id]: score.score for score in scores}
+
+        # Thêm vào danh sách kết quả
+        student_scores.append(StudentScoreResponse(
+            student_id=student.student_id,
+            student_name=student.name,
+            scores=score_dict
+        ))
+
+    return student_scores

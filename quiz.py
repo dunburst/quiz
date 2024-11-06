@@ -388,3 +388,4 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
         time_limit= quiz.time_limit,
         questions=question_responses
     )
+
