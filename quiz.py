@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from sqlalchemy.sql import func, case
 from pydantic import BaseModel
 from database import get_db
 from models import Teacher, Subject, Admin, Class, Distribution, Quiz, Class_quiz, Questions, Answer, Student, Choice, Score
@@ -389,3 +390,49 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
         questions=question_responses
     )
 
+class QuizSummaryResponse(BaseModel):
+    quiz_id: str
+    title: str
+    students_with_scores: int
+    total_student: int
+    average_score: float
+
+@router.get("/api/teacher/quizzes/score", response_model=List[QuizSummaryResponse], tags=["Quizzes"])
+def get_quizzes_by_teacher(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: Teacher = Depends(get_current_user)
+):
+    # Check if the current user is a teacher
+    if not isinstance(current_user, Teacher):
+        raise HTTPException(status_code=403, detail="Only teachers can access this endpoint.")
+
+    # Query to get quizzes assigned to the current teacher and specific class
+    quiz_summaries = (
+        db.query(
+            Quiz.quiz_id,
+            Quiz.title,
+           func.count(case((Score.status == "Completed", Score.student_id), else_=None)).label("students_with_scores"),
+            func.count(Student.student_id).label("total_student"),
+            func.avg(Score.score).label("average_score")
+        )
+        .join(Class_quiz, Class_quiz.quiz_id == Quiz.quiz_id)
+        .join(Student, Student.class_id == Class_quiz.class_id)
+        .outerjoin(Score, (Score.quiz_id == Quiz.quiz_id) & (Score.student_id == Student.student_id))
+        .filter(Quiz.teacher_id == current_user.teacher_id)  # Filter by current teacher
+        .filter(Class_quiz.class_id == class_id)  # Filter by specific class_id
+        .group_by(Quiz.quiz_id)
+        .all()
+    )
+
+    # Construct response data
+    return [
+        QuizSummaryResponse(
+            quiz_id=quiz.quiz_id,
+            title=quiz.title,
+            students_with_scores=quiz.students_with_scores,
+            total_student=quiz.total_student,
+            average_score=round(quiz.average_score, 2) if quiz.average_score is not None else 0.0
+        )
+        for quiz in quiz_summaries
+    ]

@@ -21,10 +21,10 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict, role: str, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, role: str, subject_id:Optional[int] = None, class_id:Optional[int] = None, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire, "role": role})
+    to_encode.update({"exp": expire, "role": role, "subject_id": subject_id, "class_id":class_id })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 class TokenData(BaseModel):
@@ -67,12 +67,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     # Kiểm tra học sinh
     student = db.query(Student).filter(Student.mastudent == form_data.username).first()
     if student and verify_password(form_data.password, student.password):
-        access_token = create_access_token(data={"sub": student.student_id}, role="student")
+        access_token = create_access_token(data={"sub": student.student_id}, role="student", class_id = student.class_id)
         return {"access_token": access_token, "token_type": "bearer", "role": "student", "first_login": student.first_login}
     # Kiểm tra giáo viên
     teacher = db.query(Teacher).filter(Teacher.mateacher == form_data.username).first()
     if teacher and verify_password(form_data.password, teacher.password):
-        access_token = create_access_token(data={"sub": teacher.teacher_id}, role="teacher")
+        access_token = create_access_token(data={"sub": teacher.teacher_id}, role="teacher", subject_id = teacher.subject_id)
         return {"access_token": access_token, "token_type": "bearer", "role": "teacher"}
     # Kiểm tra quản trị viên
     admin = db.query(Admin).filter(Admin.admin_id == form_data.username).first()
@@ -92,10 +92,10 @@ class ChangeRespone(BaseModel):
 def change_password(
     request: ChangeRespone,
     db: Session = Depends(get_db),
-    current_user: Union[Student, Teacher] = Depends(get_current_user)
+    current_user: Student = Depends(get_current_user)
 ):
     if not isinstance(current_user, (Student, Teacher)):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh hoặc giáo viên mới có thể thay đổi mật khẩu")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh mới có thể thay đổi mật khẩu")
     if request.new_password != request.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mật khẩu xác nhận không đúng")
     if current_user.first_login is False:

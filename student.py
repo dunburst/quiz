@@ -314,7 +314,7 @@ class StudentScoreResponse(BaseModel):
     scores: dict  # Dạng {quiz_title: score}
 
 # API to get students and scores by class_id
-@router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Classes"])
+@router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Teachers"])
 def get_class_students_scores(
     class_id: int,
     db: Session = Depends(get_db),
@@ -344,6 +344,10 @@ def get_class_students_scores(
         # Lấy điểm của học sinh cho các quiz
         scores = db.query(Score).filter(Score.student_id == student.student_id, Score.quiz_id.in_(quiz_titles.keys())).all()
         score_dict = {quiz_titles[score.quiz_id]: score.score for score in scores}
+        # Đảm bảo tất cả các quiz đều có mặt trong score_dict, nếu không thì thêm null
+        for quiz_id, quiz_title in quiz_titles.items():
+            if quiz_title not in score_dict:
+                score_dict[quiz_title] = None
 
         # Thêm vào danh sách kết quả
         student_scores.append(StudentScoreResponse(
