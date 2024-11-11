@@ -99,7 +99,8 @@ def get_teacher_classes(
         if class_info:
             classes_data.append({
                 "class_id": class_info.class_id,
-                "name_class": class_info.name_class
+                "name_class": class_info.name_class,
+                "total_student": class_info.total_student
             })
     return {
         "teacher_id": teacher.teacher_id,

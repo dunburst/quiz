@@ -62,18 +62,19 @@ class Token(BaseModel):
     token_type: str
     role: str
     first_login: Optional[bool] = None 
+    image: Optional[str] = None 
 @router.post("/token", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Kiểm tra học sinh
     student = db.query(Student).filter(Student.mastudent == form_data.username).first()
     if student and verify_password(form_data.password, student.password):
         access_token = create_access_token(data={"sub": student.student_id}, role="student", class_id = student.class_id)
-        return {"access_token": access_token, "token_type": "bearer", "role": "student", "first_login": student.first_login}
+        return {"access_token": access_token, "token_type": "bearer", "role": "student", "first_login": student.first_login, "image": student.image}
     # Kiểm tra giáo viên
     teacher = db.query(Teacher).filter(Teacher.mateacher == form_data.username).first()
     if teacher and verify_password(form_data.password, teacher.password):
         access_token = create_access_token(data={"sub": teacher.teacher_id}, role="teacher", subject_id = teacher.subject_id)
-        return {"access_token": access_token, "token_type": "bearer", "role": "teacher"}
+        return {"access_token": access_token, "token_type": "bearer", "role": "teacher", "image": teacher.image}
     # Kiểm tra quản trị viên
     admin = db.query(Admin).filter(Admin.admin_id == form_data.username).first()
     if admin and verify_password(form_data.password, admin.password):

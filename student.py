@@ -223,6 +223,7 @@ def get_student_class_subject_teacher(
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
         subjects_data.append({
             "subject_id": subject.subject_id,
+            "subject_image": subject.image,
             "subject_name": subject.name_subject,
             "teacher": {
                 "teacher_id": teacher.teacher_id,
@@ -318,7 +319,7 @@ class StudentScoreResponse(BaseModel):
 def get_class_students_scores(
     class_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user : Teacher = Depends(get_current_user)
 ):
     # Xác nhận người dùng có quyền truy cập
     if not isinstance(current_user, Teacher):
@@ -335,7 +336,7 @@ def get_class_students_scores(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found in this class")
 
     # Lấy danh sách các quiz của lớp
-    quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id).all()
+    quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id, Quiz.teacher_id==current_user.teacher_id).all()
     quiz_titles = {quiz.quiz_id: quiz.title for quiz in quizzes}
 
     # Tạo kết quả cho từng học sinh
