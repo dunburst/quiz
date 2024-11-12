@@ -29,6 +29,5 @@ def read_user_notifications(current_user: BaseModel = Depends(get_current_user),
         notifications = db.query(Notification).filter(Notification.teacher_id == current_user.teacher_id).all()
     else:
         raise HTTPException(status_code=400, detail="Invalid user role")
-
     return notifications
 

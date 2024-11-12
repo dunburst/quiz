@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from database import get_db
-from models import Student, Teacher, Admin
+from models import Student, Teacher, Admin, Class, Subject
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from typing import Optional, Union
@@ -107,12 +107,117 @@ def change_password(
     return {"message": "Đổi mật khẩu thành công"}
 
 @router.get("/users/me")
-def read_users_me(current_user: BaseModel = Depends(get_current_user)):
+def read_users_me(current_user: BaseModel = Depends(get_current_user), db: Session = Depends(get_db)):
     if isinstance(current_user, Student):
-        return {"user_id": current_user.student_id, "role": "student", "first_login": current_user.first_login}
+        classes = db.query(Class).filter(Class.class_id == current_user.class_id).first()
+        return {"user_id": current_user.student_id, 
+                "role": "student", 
+                "mastudent": current_user.mastudent,
+                "gender" :current_user.gender,
+                "name" : current_user.name, 
+                "birth_date" : current_user.birth_date, 
+                "email" : current_user.email, 
+                "phone_number": current_user.phone_number, 
+                "image" : current_user.image, 
+                "name_class" : classes.name_class,
+                "first_login": current_user.first_login}
     elif isinstance(current_user, Teacher):
-        return {"user_id": current_user.teacher_id, "role": "teacher", "first_login": current_user.first_login}
+        subjects = db.query(Subject).filter(Subject.subject_id == current_user.subject_id).first()
+        return {"user_id": current_user.teacher_id,
+                "role": "teacher", 
+                "mateacher": current_user.mateacher,
+                "gender" :current_user.gender,
+                "name" : current_user.name, 
+                "birth_date" : current_user.birth_date, 
+                "email" : current_user.email, 
+                "phone_number": current_user.phone_number, 
+                "image" : current_user.image, 
+                "name_subject" : subjects.name_subject}
     elif isinstance(current_user, Admin):
         return {"user_id": current_user.admin_id, "role": "admin"}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid user role")
+        
+# Model để nhận thông tin cập nhật
+class UpdateUserRequest(BaseModel):
+    name: Optional[str] = None
+    gender: Optional[str] = None
+    birth_date: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    image: Optional[str] = None
+@router.put("/users/put/me", response_model=BaseModel)
+def update_user(
+    request: UpdateUserRequest,
+    db: Session = Depends(get_db),
+    current_user: BaseModel = Depends(get_current_user)
+):
+    if isinstance(current_user, Student):
+        if request.name:
+            current_user.name = request.name
+        if request.gender:
+            current_user.gender = request.gender
+        if request.birth_date:
+            current_user.birth_date = request.birth_date
+        if request.email:
+            current_user.email = request.email
+        if request.phone_number:
+            current_user.phone_number = request.phone_number
+        if request.image:
+            current_user.image = request.image
+        db.commit()
+        classes = db.query(Class).filter(Class.class_id == current_user.class_id).first()
+        return {
+            "user_id": current_user.student_id,
+            "role": "student",
+            "mastudent": current_user.mastudent,
+            "gender": current_user.gender,
+            "name": current_user.name,
+            "birth_date": current_user.birth_date,
+            "email": current_user.email,
+            "phone_number": current_user.phone_number,
+            "image": current_user.image,
+            "name_class": classes.name_class if classes else "Unknown",
+            "first_login": current_user.first_login
+        }
+    elif isinstance(current_user, Teacher):
+        if request.name:
+            current_user.name = request.name
+        if request.gender:
+            current_user.gender = request.gender
+        if request.birth_date:
+            current_user.birth_date = request.birth_date
+        if request.email:
+            current_user.email = request.email
+        if request.phone_number:
+            current_user.phone_number = request.phone_number
+        if request.image:
+            current_user.image = request.image
+        db.commit()
+        subjects = db.query(Subject).filter(Subject.subject_id == current_user.subject_id).first()
+        return {
+            "user_id": current_user.teacher_id,
+            "role": "teacher",
+            "mateacher": current_user.mateacher,
+            "gender": current_user.gender,
+            "name": current_user.name,
+            "birth_date": current_user.birth_date,
+            "email": current_user.email,
+            "phone_number": current_user.phone_number,
+            "image": current_user.image,
+            "name_subject": subjects.name_subject if subjects else "Unknown"
+        }
+    elif isinstance(current_user, Admin):
+        if request.name:
+            current_user.name = request.name
+        if request.email:
+            current_user.email = request.email
+        if request.phone_number:
+            current_user.phone_number = request.phone_number
+        if request.image:
+            current_user.image = request.image
+        db.commit()
+
+        return {"user_id": current_user.admin_id, "role": "admin", "name": current_user.name, "email": current_user.email, "phone_number": current_user.phone_number, "image": current_user.image}
     else:
         raise HTTPException(status_code=400, detail="Invalid user role")

@@ -67,6 +67,99 @@ def get_all_students(
         student_list.append(student_info)
     # Paginate and return the response
     return paginate(student_list, params)
+#Chi tiết người dùng
+@router.get("/api/student/{student_id}", response_model=StudentResponse, tags=["Students"])
+def get_student_details(
+    student_id: str,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
+):
+    # Kiểm tra quyền truy cập của người dùng (chỉ admin mới được phép)
+    if not isinstance(current_user, Admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
+    # Tìm học sinh theo student_id
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    # Lấy thông tin lớp học của học sinh
+    classe = db.query(Class).filter(Class.class_id == student.class_id).first()
+    # Tạo dữ liệu trả về
+    student_info = StudentResponse(
+        student_id=student.student_id,
+        mastudent=student.mastudent,
+        gender=student.gender,
+        name=student.name,
+        birth_date=student.birth_date,
+        email=student.email,
+        phone_number=student.phone_number,
+        image=student.image,
+        class_id=student.class_id,
+        name_class=classe.name_class if classe else "Unknown",
+        first_login=student.first_login
+    )
+    return student_info
+
+# Model dùng để nhận dữ liệu cập nhật
+class UpdateStudentRequest(BaseModel):
+    mastudent: Optional[str] = None
+    name: Optional[str] = None
+    gender: Optional[str] = None
+    birth_date: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    image: Optional[str] = None
+    class_id: Optional[int] = None
+
+# API route để cập nhật thông tin học sinh
+@router.put("/api/put/student/{student_id}", response_model=StudentResponse, tags=["Students"])
+def update_student(
+    student_id: str,
+    request: UpdateStudentRequest,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
+):
+    # Kiểm tra quyền truy cập của người dùng (chỉ admin mới được phép)
+    if not isinstance(current_user, Admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update student information")
+    # Tìm học sinh theo student_id
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    # Cập nhật các thông tin nếu có trong request
+    if request.mastudent:
+        student.mastudent = request.mastudent
+    if request.name:
+        student.name = request.name
+    if request.gender:
+        student.gender = request.gender
+    if request.birth_date:
+        student.birth_date = request.birth_date
+    if request.email:
+        student.email = request.email
+    if request.phone_number:
+        student.phone_number = request.phone_number
+    if request.image:
+        student.image = request.image
+    if request.class_id:
+        student.class_id = request.class_id
+    # Lưu thay đổi vào cơ sở dữ liệu
+    db.commit()
+    # Lấy lại thông tin học sinh đã cập nhật và trả về
+    classe = db.query(Class).filter(Class.class_id == student.class_id).first()
+    updated_student = StudentResponse(
+        student_id=student.student_id,
+        mastudent=student.mastudent,
+        gender=student.gender,
+        name=student.name,
+        birth_date=student.birth_date,
+        email=student.email,
+        phone_number=student.phone_number,
+        image=student.image,
+        class_id=student.class_id,
+        name_class=classe.name_class if classe else "Unknown",
+        first_login=student.first_login
+    )
+    return updated_student
 
 # Thêm học sinh
 class StudentCreate(BaseModel):

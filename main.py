@@ -7,6 +7,7 @@ from classes import router as class_router
 from quiz import router as quiz_router
 from feedback import router as feedback_router
 from notification import router as notification_router
+#from thu import router as thu_router
 from database import Base, engine
 import uvicorn
 
@@ -30,5 +31,6 @@ app.include_router(class_router)
 app.include_router(quiz_router)
 app.include_router(feedback_router)
 app.include_router(notification_router)
+#app.include_router(thu_router)
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

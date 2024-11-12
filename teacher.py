@@ -68,6 +68,103 @@ def get_all_teachers(
     # Paginate and return the response
     return paginate(teacher_data, params)
 
+# API route để lấy thông tin chi tiết một giáo viên
+@router.get("/api/teachers/{teacher_id}", response_model=TeacherResponse, tags=["Teachers"])
+def get_teacher_detail(
+    teacher_id: str,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
+):
+    if not isinstance(current_user, Admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found")
+    subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+    distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
+    class_info = []
+    for distribution in distributions:
+        class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
+        if class_data:
+            class_info.append({
+                "class_id": class_data.class_id,
+                "name_class": class_data.name_class
+            })
+    return {
+        "teacher_id": teacher.teacher_id,
+        "mateacher": teacher.mateacher,
+        "gender": teacher.gender,
+        "name": teacher.name,
+        "birth_date": teacher.birth_date,
+        "email": teacher.email,
+        "phone_number": teacher.phone_number,
+        "image": teacher.image,
+        "subject": subject.name_subject if subject else "Unknown",
+        "classes": class_info
+    }
+
+# Model để nhận thông tin cập nhật từ người dùng
+class TeacherUpdateRequest(BaseModel):
+    mateacher: Optional[str] = None
+    gender: Optional[str] = None
+    name: Optional[str] = None
+    birth_date: Optional[datetime] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    image: Optional[str] = None
+    subject_id: Optional[int] = None
+@router.put("/api/teachers/{teacher_id}", response_model=TeacherResponse, tags=["Teachers"])
+def update_teacher(
+    teacher_id: str,
+    request: TeacherUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
+):
+    if not isinstance(current_user, Admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update teacher information")
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found")
+    if request.mateacher:
+        teacher.mateacher = request.mateacher
+    if request.gender:
+        teacher.gender = request.gender
+    if request.name:
+        teacher.name = request.name
+    if request.birth_date:
+        teacher.birth_date = request.birth_date
+    if request.email:
+        teacher.email = request.email
+    if request.phone_number:
+        teacher.phone_number = request.phone_number
+    if request.image:
+        teacher.image = request.image
+    if request.subject_id:
+        teacher.subject_id = request.subject_id
+    db.commit()
+    subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+    distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
+    class_info = []
+    for distribution in distributions:
+        class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
+        if class_data:
+            class_info.append({
+                "class_id": class_data.class_id,
+                "name_class": class_data.name_class
+            })
+    return {
+        "teacher_id": teacher.teacher_id,
+        "mateacher": teacher.mateacher,
+        "gender": teacher.gender,
+        "name": teacher.name,
+        "birth_date": teacher.birth_date,
+        "email": teacher.email,
+        "phone_number": teacher.phone_number,
+        "image": teacher.image,
+        "subject": subject.name_subject if subject else "Unknown",
+        "classes": class_info
+    }
+
 # Thêm giáo viên
 class TeacherCreate(BaseModel):
     mateacher: str

@@ -141,7 +141,10 @@ def create_feedback(
         feedback.class_id = current_user.class_id
         if not feedback.subject_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cần cung cấp subject_id để tạo phản hồi.")
-        student = db.query(Student).filter(Student.student_id == current_user.student_id, Student.class_id == feedback.class_id).first()
+        student = db.query(Student).filter(
+            Student.student_id == current_user.student_id,
+            Student.class_id == feedback.class_id
+        ).first()
         if not student:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền gửi phản hồi cho lớp này.")
     elif isinstance(current_user, Teacher):
@@ -180,21 +183,20 @@ def create_feedback(
 
     # Xác định đối tượng nhận thông báo
     recipients = []
-    # Lấy danh sách giáo viên có quyền xem phản hồi này
-    if feedback.class_id and feedback.subject_id:
+
+    # Nếu người tạo phản hồi là giáo viên, gửi thông báo đến tất cả học sinh trong lớp
+    if isinstance(current_user, Teacher):
+        students = db.query(Student).filter(Student.class_id == feedback.class_id).all()
+        recipients.extend(students)
+
+    # Nếu người tạo phản hồi là học sinh, gửi thông báo đến giáo viên phụ trách môn học của lớp
+    elif isinstance(current_user, Student):
         teachers = db.query(Teacher).join(Distribution).filter(
             Distribution.class_id == feedback.class_id,
-            Teacher.teacher_id != current_user.teacher_id  # Loại bỏ người tạo phản hồi
+            Teacher.subject_id == feedback.subject_id
         ).all()
         recipients.extend(teachers)
 
-    # Lấy danh sách học sinh trong lớp có quyền xem phản hồi này, ngoại trừ người tạo phản hồi
-    if isinstance(current_user, Student):
-        students = db.query(Student).filter(
-            Student.class_id == feedback.class_id,
-            Student.student_id != current_user.student_id  # Loại bỏ người tạo phản hồi
-        ).all()
-        recipients.extend(students)
     # Tạo thông báo cho mỗi người nhận
     for recipient in recipients:
         notification = Notification(
@@ -205,6 +207,7 @@ def create_feedback(
             student_id=recipient.student_id if isinstance(recipient, Student) else None
         )
         db.add(notification)
+
     db.commit()
     return FeedbackResponse(
         feedback_id=new_feedback.feedback_id,
