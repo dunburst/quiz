@@ -52,7 +52,7 @@ class QuizDetailResponse(BaseModel):
     questions: List[QuestionResponse]
 
 #API lấy thông tin bài tập của giáo viên 
-@router.get("/api/teachers/quizzes", response_model=Page[dict], tags=["Quizzes"])
+@router.get("/api/teacher/quizzes", response_model=Page[dict], tags=["Quizzes"])
 def get_teacher_quizzes(
     db: Session = Depends(get_db), 
     params: Params = Depends(),

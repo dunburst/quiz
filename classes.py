@@ -79,7 +79,7 @@ def get_class_details(class_id: int, db: Session = Depends(get_db), current_user
     }
     
 # API lấy thông tin các lớp học mà giáo viên phụ trách
-@router.get("/api/teachers/classes", tags=["Classes"])
+@router.get("/api/teacher/classes", tags=["Classes"])
 def get_teacher_classes(
     db: Session = Depends(get_db), 
     current_user: Teacher = Depends(get_current_user)  # Xác nhận current_user là giáo viên

@@ -6,6 +6,7 @@ from database import get_db
 from models import Student, Class, Admin, Distribution, Subject, Teacher, Class_quiz, Questions, Quiz, Score
 from auth import hash_password, get_current_user
 import uuid
+from sqlalchemy import asc 
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
@@ -42,8 +43,9 @@ def get_all_students(
 ):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
-    # Fetch all students and their respective classes
-    students = db.query(Student).all()
+
+    # Fetch all students and their respective classes, sắp xếp theo mastudent tăng dần
+    students = db.query(Student).order_by(asc(Student.mastudent)).all()
     # Check if no students are found
     if not students:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found")
@@ -278,6 +280,7 @@ def search_students(
     for student in students:
         classe = db.query(Class).filter(Class.class_id == student.class_id).first()
         student_info = {
+            "student_id": student.student_id,
             "mastudent": student.mastudent,
             "name": student.name,
             "gender": student.gender,
@@ -286,7 +289,8 @@ def search_students(
             "phone_number": student.phone_number,
             "image": student.image,
             "class_id": student.class_id,
-            "name_class": classe.name_class if classe else "Không rõ"
+            "name_class": classe.name_class if classe else "Không rõ",
+            "first_login": student.first_login
         }
         student_data.append(student_info)
     return paginate(student_data, params)

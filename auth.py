@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -7,9 +7,11 @@ from database import get_db
 from models import Student, Teacher, Admin, Class, Subject
 from pydantic import BaseModel
 from passlib.context import CryptContext
+from uuid import uuid4
+import os
 from typing import Optional, Union
 import uuid
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -69,12 +71,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     student = db.query(Student).filter(Student.mastudent == form_data.username).first()
     if student and verify_password(form_data.password, student.password):
         access_token = create_access_token(data={"sub": student.student_id}, role="student", class_id = student.class_id)
-        return {"access_token": access_token, "token_type": "bearer", "role": "student", "first_login": student.first_login, "image": student.image}
+        return {"access_token": access_token, "token_type": "bearer", "role": "student", "first_login": student.first_login}
     # Kiểm tra giáo viên
     teacher = db.query(Teacher).filter(Teacher.mateacher == form_data.username).first()
     if teacher and verify_password(form_data.password, teacher.password):
         access_token = create_access_token(data={"sub": teacher.teacher_id}, role="teacher", subject_id = teacher.subject_id)
-        return {"access_token": access_token, "token_type": "bearer", "role": "teacher", "image": teacher.image}
+        return {"access_token": access_token, "token_type": "bearer", "role": "teacher"}
     # Kiểm tra quản trị viên
     admin = db.query(Admin).filter(Admin.admin_id == form_data.username).first()
     if admin and verify_password(form_data.password, admin.password):
@@ -138,86 +140,34 @@ def read_users_me(current_user: BaseModel = Depends(get_current_user), db: Sessi
     else:
         raise HTTPException(status_code=400, detail="Invalid user role")
         
-# Model để nhận thông tin cập nhật
-class UpdateUserRequest(BaseModel):
-    name: Optional[str] = None
-    gender: Optional[str] = None
-    birth_date: Optional[str] = None
-    email: Optional[str] = None
-    phone_number: Optional[str] = None
-    image: Optional[str] = None
-@router.put("/users/put/me", response_model=BaseModel)
-def update_user(
-    request: UpdateUserRequest,
+
+#Upload avatar
+@router.post("/users/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: BaseModel = Depends(get_current_user)
 ):
-    if isinstance(current_user, Student):
-        if request.name:
-            current_user.name = request.name
-        if request.gender:
-            current_user.gender = request.gender
-        if request.birth_date:
-            current_user.birth_date = request.birth_date
-        if request.email:
-            current_user.email = request.email
-        if request.phone_number:
-            current_user.phone_number = request.phone_number
-        if request.image:
-            current_user.image = request.image
-        db.commit()
-        classes = db.query(Class).filter(Class.class_id == current_user.class_id).first()
-        return {
-            "user_id": current_user.student_id,
-            "role": "student",
-            "mastudent": current_user.mastudent,
-            "gender": current_user.gender,
-            "name": current_user.name,
-            "birth_date": current_user.birth_date,
-            "email": current_user.email,
-            "phone_number": current_user.phone_number,
-            "image": current_user.image,
-            "name_class": classes.name_class if classes else "Unknown",
-            "first_login": current_user.first_login
-        }
-    elif isinstance(current_user, Teacher):
-        if request.name:
-            current_user.name = request.name
-        if request.gender:
-            current_user.gender = request.gender
-        if request.birth_date:
-            current_user.birth_date = request.birth_date
-        if request.email:
-            current_user.email = request.email
-        if request.phone_number:
-            current_user.phone_number = request.phone_number
-        if request.image:
-            current_user.image = request.image
-        db.commit()
-        subjects = db.query(Subject).filter(Subject.subject_id == current_user.subject_id).first()
-        return {
-            "user_id": current_user.teacher_id,
-            "role": "teacher",
-            "mateacher": current_user.mateacher,
-            "gender": current_user.gender,
-            "name": current_user.name,
-            "birth_date": current_user.birth_date,
-            "email": current_user.email,
-            "phone_number": current_user.phone_number,
-            "image": current_user.image,
-            "name_subject": subjects.name_subject if subjects else "Unknown"
-        }
-    elif isinstance(current_user, Admin):
-        if request.name:
-            current_user.name = request.name
-        if request.email:
-            current_user.email = request.email
-        if request.phone_number:
-            current_user.phone_number = request.phone_number
-        if request.image:
-            current_user.image = request.image
-        db.commit()
-
-        return {"user_id": current_user.admin_id, "role": "admin", "name": current_user.name, "email": current_user.email, "phone_number": current_user.phone_number, "image": current_user.image}
-    else:
-        raise HTTPException(status_code=400, detail="Invalid user role")
+    # Kiểm tra nếu người dùng là học sinh hoặc giáo viên
+    if not isinstance(current_user, (Student, Teacher)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh và giáo viên mới có thể thay đổi ảnh đại diện")
+    # Kiểm tra đuôi tệp ảnh
+    if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Định dạng ảnh không hợp lệ")
+    # Xóa ảnh cũ nếu tồn tại
+    if current_user.image:
+        old_file_path = os.path.join(AVATAR_UPLOAD_PATH, current_user.image)
+        if os.path.exists(old_file_path):
+            os.remove(old_file_path)
+    # Tạo tên tệp duy nhất và xác định đường dẫn lưu
+    file_extension = file.filename.split(".")[-1]
+    new_filename = f"{uuid4()}.{file_extension}"
+    file_path = os.path.join(AVATAR_UPLOAD_PATH, new_filename)
+    # Lưu tệp ảnh mới vào thư mục đích
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+    # Cập nhật đường dẫn ảnh vào cơ sở dữ liệu của người dùng
+    image_url = new_filename  # Đường dẫn lưu trữ
+    current_user.image = image_url
+    db.commit()
+    return {"message": "Tải lên ảnh thành công", "image_url": image_url}

@@ -6,6 +6,7 @@ from database import get_db
 from models import Teacher, Subject, Admin, Class, Distribution
 from auth import hash_password, get_current_user
 import uuid
+from sqlalchemy import asc 
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
@@ -33,15 +34,19 @@ def get_all_teachers(
 ):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
-    # Fetch all teachers
-    teachers = db.query(Teacher).all()
+
+    # Fetch all teachers sorted by mateacher in ascending order
+    teachers = db.query(Teacher).order_by(asc(Teacher.mateacher)).all()
+
     # Check if no teachers are found
     if not teachers:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No teachers found")
+
     teacher_data = []
     for teacher in teachers:
         # Retrieve subject name
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
+        
         # Retrieve class information for each teacher
         distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
         class_info = []
@@ -52,6 +57,7 @@ def get_all_teachers(
                     "class_id": class_data.class_id,
                     "name_class": class_data.name_class
                 })
+        
         # Append teacher data including subject and classes
         teacher_data.append({
             "teacher_id": teacher.teacher_id,
@@ -65,8 +71,9 @@ def get_all_teachers(
             "subject": subject.name_subject if subject else "Unknown",
             "classes": class_info
         })
+
     # Paginate and return the response
-    return paginate(teacher_data, params)
+    return paginate(teacher_data, params)   
 
 # API route để lấy thông tin chi tiết một giáo viên
 @router.get("/api/teachers/{teacher_id}", response_model=TeacherResponse, tags=["Teachers"])
