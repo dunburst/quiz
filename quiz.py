@@ -396,6 +396,7 @@ class QuizDetailResponse1(BaseModel):
     quiz_id: str
     title: str
     time_limit: int
+    due_date: datetime
     questions: List[QuestionResponse]
 #API lấy thông tin chi tiết về các question
 @router.get("/api/quiz1/{quiz_id}", response_model=QuizDetailResponse1, tags=["Students"])
@@ -426,6 +427,7 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
         quiz_id=quiz.quiz_id,
         title=quiz.title, 
         time_limit= quiz.time_limit,
+        due_date= quiz.due_date,
         questions=question_responses
     )
 

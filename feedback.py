@@ -1,17 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Union
 from pydantic import BaseModel
 from database import get_db
-from models import Teacher, Subject, Admin, Class, Distribution, Feedback, Distribution, Student, Notification
-from auth import hash_password, get_current_user
+from models import Teacher, Subject, Admin, Class, Distribution, Feedback, Student, Notification
+from auth import get_current_user
 import uuid
-from sqlalchemy.exc import IntegrityError
 from datetime import datetime
-from fastapi_pagination import Page, Params, paginate
-from typing import List, Optional
-from sqlalchemy import desc
+
 router = APIRouter()
+
+# Models
 class FeedbackReply(BaseModel):
     feedback_id: str
     context: str
@@ -22,8 +21,10 @@ class FeedbackReply(BaseModel):
     is_parents: int
     parent_id: Optional[str] = None
     created_at: datetime
-    teacher_name: Optional[str] = None  # Thêm trường để lưu tên giáo viên nếu có
-    student_name: Optional[str] = None  # Thêm trường để lưu tên học sinh nếu có
+    teacher_name: Optional[str] = None
+    student_name: Optional[str] = None
+    name_subject: Optional[str] = None  # Tên môn học
+
 
 class FeedbackResponse(BaseModel):
     feedback_id: str
@@ -36,9 +37,19 @@ class FeedbackResponse(BaseModel):
     parent_id: Optional[str] = None
     created_at: datetime
     replies: List[FeedbackReply] = []  # Danh sách phản hồi con
-    teacher_name: Optional[str] = None  # Thêm trường để lưu tên giáo viên nếu có
-    student_name: Optional[str] = None  # Thêm trường để lưu tên học sinh nếu có
+    teacher_name: Optional[str] = None
+    student_name: Optional[str] = None
+    name_subject: Optional[str] = None  # Tên môn học
 
+
+class FeedbackCreate(BaseModel):
+    context: str
+    subject_id: Optional[int] = None
+    class_id: Optional[int] = None
+    parent_id: Optional[str] = None
+
+
+# API Endpoints
 @router.get("/api/feedback", response_model=List[FeedbackResponse], tags=["Feedback"])
 def get_feedback(
     class_id: Optional[int] = None,
@@ -47,12 +58,10 @@ def get_feedback(
     current_user: Union[Student, Teacher, Admin] = Depends(get_current_user),
 ):
     if isinstance(current_user, Student):
-        # Lấy class_id từ token, chỉ cần kiểm tra subject_id được cung cấp
         class_id = current_user.class_id
         if not subject_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cần cung cấp subject_id để truy cập phản hồi.")
     elif isinstance(current_user, Teacher):
-        # Lấy subject_id từ token, chỉ cần kiểm tra class_id được cung cấp
         subject_id = current_user.subject_id
         if not class_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cần cung cấp class_id để truy cập phản hồi.")
@@ -70,19 +79,15 @@ def get_feedback(
             detail="Chỉ học sinh, giáo viên và quản trị viên mới có quyền xem phản hồi."
         )
 
-    # Lấy tất cả phản hồi theo class_id và subject_id
-    feedback_list = db.query(Feedback).filter_by(
-        class_id=class_id,
-        subject_id=subject_id
-    ).all()
+    feedback_list = db.query(Feedback).filter_by(class_id=class_id, subject_id=subject_id).all()
+    subject = db.query(Subject).filter(Subject.subject_id == subject_id).first()
+    name_subject = subject.name_subject if subject else None
 
-    # Tạo một dictionary để nhóm phản hồi cha và con
     feedback_dict = {}
     for fb in feedback_list:
         teacher_name = None
         student_name = None
 
-        # Lấy tên người phản hồi nếu là giáo viên hoặc học sinh
         if fb.teacher_id:
             teacher = db.query(Teacher).filter_by(teacher_id=fb.teacher_id).first()
             teacher_name = teacher.name if teacher else None
@@ -103,7 +108,8 @@ def get_feedback(
                 created_at=fb.created_at,
                 replies=[],
                 teacher_name=teacher_name,
-                student_name=student_name
+                student_name=student_name,
+                name_subject=name_subject
             )
         elif fb.is_parents == 1:
             if fb.parent_id in feedback_dict:
@@ -118,17 +124,12 @@ def get_feedback(
                     parent_id=fb.parent_id,
                     created_at=fb.created_at,
                     teacher_name=teacher_name,
-                    student_name=student_name
+                    student_name=student_name,
+                    name_subject=name_subject
                 ))
 
-    result = list(feedback_dict.values())
-    return result
+    return list(feedback_dict.values())
 
-class FeedbackCreate(BaseModel):
-    context: str
-    subject_id: Optional[int] = None
-    class_id: Optional[int] = None
-    parent_id: Optional[str] = None
 
 @router.post("/api/post/feedback", response_model=FeedbackResponse, tags=["Feedback"])
 def create_feedback(
@@ -136,7 +137,6 @@ def create_feedback(
     db: Session = Depends(get_db),
     current_user: Union[Student, Teacher] = Depends(get_current_user),
 ):
-    # Kiểm tra quyền của học sinh hoặc giáo viên
     if isinstance(current_user, Student):
         feedback.class_id = current_user.class_id
         if not feedback.subject_id:
@@ -160,10 +160,7 @@ def create_feedback(
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh và giáo viên mới có quyền tạo phản hồi.")
 
-    # Xác định is_parents dựa trên việc có parent_id hay không
     is_parents = 1 if feedback.parent_id else 0
-
-    # Tạo phản hồi mới
     new_feedback = Feedback(
         context=feedback.context,
         teacher_id=current_user.teacher_id if isinstance(current_user, Teacher) else None,
@@ -177,38 +174,11 @@ def create_feedback(
     db.commit()
     db.refresh(new_feedback)
 
-    # Lấy tên của người tạo phản hồi
+    subject = db.query(Subject).filter(Subject.subject_id == feedback.subject_id).first()
+    name_subject = subject.name_subject if subject else None
     teacher_name = current_user.name if isinstance(current_user, Teacher) else None
     student_name = current_user.name if isinstance(current_user, Student) else None
 
-    # Xác định đối tượng nhận thông báo
-    recipients = []
-
-    # Nếu người tạo phản hồi là giáo viên, gửi thông báo đến tất cả học sinh trong lớp
-    if isinstance(current_user, Teacher):
-        students = db.query(Student).filter(Student.class_id == feedback.class_id).all()
-        recipients.extend(students)
-
-    # Nếu người tạo phản hồi là học sinh, gửi thông báo đến giáo viên phụ trách môn học của lớp
-    elif isinstance(current_user, Student):
-        teachers = db.query(Teacher).join(Distribution).filter(
-            Distribution.class_id == feedback.class_id,
-            Teacher.subject_id == feedback.subject_id
-        ).all()
-        recipients.extend(teachers)
-
-    # Tạo thông báo cho mỗi người nhận
-    for recipient in recipients:
-        notification = Notification(
-            noti_id=str(uuid.uuid4()),
-            context=f"Có một phản hồi mới trong lớp {feedback.class_id} về môn học {feedback.subject_id}.",
-            time=datetime.now(),
-            teacher_id=recipient.teacher_id if isinstance(recipient, Teacher) else None,
-            student_id=recipient.student_id if isinstance(recipient, Student) else None
-        )
-        db.add(notification)
-
-    db.commit()
     return FeedbackResponse(
         feedback_id=new_feedback.feedback_id,
         context=new_feedback.context,
@@ -221,5 +191,6 @@ def create_feedback(
         created_at=new_feedback.created_at,
         replies=[],
         teacher_name=teacher_name,
-        student_name=student_name
+        student_name=student_name,
+        name_subject=name_subject
     )
