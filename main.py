@@ -16,12 +16,19 @@ app = FastAPI()
 
 # Cấu hình CORS
 origins = ["http://localhost:3000"]
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=origins,
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Cho phép tất cả origin
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Cho phép tất cả phương thức HTTP (GET, POST, PUT, DELETE, ...)
+    allow_headers=["*"],  # Cho phép tất cả header
 )
 Base.metadata.create_all(bind=engine)
 app.include_router(auth_router)
