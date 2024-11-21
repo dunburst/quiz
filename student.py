@@ -280,7 +280,7 @@ def get_quizzes_by_subject(
     
     # Lấy điểm của học sinh cho các quiz này
     scores = db.query(Score).filter(Score.student_id == current_user.student_id).all()
-    score_dict = {score.quiz_id: score.score for score in scores}
+    score_dict = {score.quiz_id: score for score in scores}
     
     if not quizzes:
         raise HTTPException(status_code=404, detail="No quizzes available for this subject and student class.")
@@ -288,19 +288,26 @@ def get_quizzes_by_subject(
     # Chuẩn bị danh sách chi tiết cho từng quiz
     quiz_details = []
     for quiz in quizzes:
-        quiz_score = score_dict.get(quiz.quiz_id, None)
+        score_entry = score_dict.get(quiz.quiz_id, None)
         status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
-
-        if status == "Expired" and quiz_score is None:
-            quiz_score = 0
+        score = None
+        
+        # Kiểm tra nếu quiz đang trong trạng thái 'Continues'
+        if score_entry and score_entry.status == "Continues":
+    
+            score = "Đang làm"
+        elif status == "Expired" and score_entry is None:
+            score = 0  # Nếu quiz đã hết hạn mà học sinh chưa làm bài, điểm là 0
             new_score = Score(
                 student_id=current_user.student_id,
                 quiz_id=quiz.quiz_id,
-                score=quiz_score
+                score=score
             )
             db.add(new_score)
             db.commit()
-
+        elif score_entry:
+            score = score_entry.score  # Lấy điểm đã lưu trong bảng Score
+        
         quiz_info = {
             "quiz_id": quiz.quiz_id,
             "title": quiz.title,
@@ -308,10 +315,11 @@ def get_quizzes_by_subject(
             "time_limit": quiz.time_limit,
             "question_count": quiz.question_count,
             "status": status,
-            "score": quiz_score,
+            "score": score,
             "teacher_id": quiz.teacher_id
         }
         quiz_details.append(quiz_info)
+    
     return paginate(quiz_details, params)
 
 

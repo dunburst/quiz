@@ -65,12 +65,23 @@ class QuizReviewResponse(BaseModel):
     title: str
     score: float
     questions: List[QuestionReview]
+
+#Chi tiết quiz cho student
+class AnswerResponse1(BaseModel):
+    answer_id: str
+    answer: str
+class QuestionResponse1(BaseModel):
+    question_id: str
+    question_text: str
+    answers: List[AnswerResponse1]
 class QuizDetailResponse1(BaseModel):
     quiz_id: str
     title: str
     time_limit: int
     due_date: datetime
-    questions: List[QuestionResponse]
+    questions: List[QuestionResponse1]
+
+#Xem điểm của học sinh
 class QuizSummaryResponse(BaseModel):
     quiz_id: str
     title: str

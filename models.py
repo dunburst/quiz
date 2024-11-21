@@ -94,7 +94,7 @@ class Score(Base):
     score = Column(Float, nullable=True)
     time_start = Column(DateTime, nullable=True)
     time_end = Column(DateTime, nullable=True)
-    status = Column(String)
+    status = Column(String, nullable=True)
     
 class Class_quiz(Base):
      __tablename__ = 'class_quiz'

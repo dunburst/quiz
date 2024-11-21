@@ -54,6 +54,7 @@ def get_class_details(class_id: int, db: Session = Depends(get_db), current_user
             "name": student.name,
             "gender": student.gender,
             "birth_date": student.birth_date,
+            "email":student.email,
             "phone_number": student.phone_number,
             "image": student.image
         })
