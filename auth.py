@@ -12,6 +12,7 @@ import os
 from typing import Optional, Union
 import uuid
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH
+from basemodel.AuthModel import TokenData, Token, ChangeRespone
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -29,9 +30,6 @@ def create_access_token(data: dict, role: str, subject_id:Optional[int] = None, 
     to_encode.update({"exp": expire, "role": role, "subject_id": subject_id, "class_id":class_id })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-class TokenData(BaseModel):
-    user_id: Optional[str] = None
-    role: Optional[str] = None 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -59,12 +57,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    role: str
-    first_login: Optional[bool] = None 
-    image: Optional[str] = None 
 @router.post("/token", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Kiểm tra học sinh
@@ -88,9 +80,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         detail="Invalid credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-class ChangeRespone(BaseModel):
-    new_password: str
-    confirm_password: str
+
 @router.post("/api/change-password")
 def change_password(
     request: ChangeRespone,

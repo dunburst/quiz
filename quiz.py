@@ -10,46 +10,8 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
+from basemodel.QuizModel import AnswerCreate, QuestionCreate, ClassAssignment, QuizCreate, AnswerUpdate, QuestionUpdate, UpdateQuestion, AnswerResponse, QuestionResponse, QuizDetailResponse, AnswerSubmission, QuizSubmission, QuestionReview, QuizReviewResponse, QuizDetailResponse1, QuizSummaryResponse
 router = APIRouter()
-class AnswerCreate(BaseModel):
-    answer: str
-    is_correct: bool
-class QuestionCreate(BaseModel):
-    question_text: str
-    answers: List[AnswerCreate]
-class ClassAssignment(BaseModel):
-    class_id: int
-class QuizCreate(BaseModel):
-    title: str
-    due_date: datetime
-    time_limit: int
-    question_count: int
-    class_assignments: List[ClassAssignment]  
-class AnswerUpdate(BaseModel):
-    answer_id: str
-    answer: str
-    is_correct: bool
-class QuestionUpdate(BaseModel):
-    question_id: str
-    question_text: str
-    answers: List[AnswerUpdate]
-class UpdateQuestion(BaseModel):
-    question: List[QuestionUpdate]
-# Các mô hình dữ liệu
-class AnswerResponse(BaseModel):
-    answer_id: str
-    answer: str
-    is_correct: bool
-
-class QuestionResponse(BaseModel):
-    question_id: str
-    question_text: str
-    answers: List[AnswerResponse]
-
-class QuizDetailResponse(BaseModel):
-    quiz_id: str
-    title: str
-    questions: List[QuestionResponse]
 
 #API lấy thông tin bài tập của giáo viên 
 @router.get("/api/teacher/quizzes", response_model=Page[dict], tags=["Quizzes"])
@@ -279,15 +241,6 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db), current_user: 
         questions=question_responses
     )
 
-# Chọn đáp án
-class AnswerSubmission(BaseModel):
-    question_id: str
-    answer_id: str
-
-class QuizSubmission(BaseModel):
-    quiz_id: str  # Thêm quiz_id vào lớp QuizSubmission
-    answers: List[AnswerSubmission]
-
 @router.post("/api/quiz/submit", tags=["Quizzes"])
 def submit_quiz(
     quiz_data: QuizSubmission,
@@ -308,7 +261,6 @@ def submit_quiz(
             student_id=current_user.student_id
         )
         db.add(new_choice)
-
     db.commit()
     # Tính điểm
     correct_answers = db.query(Answer.answer_id).join(Questions).filter(
@@ -335,18 +287,6 @@ def submit_quiz(
         "score": score
     }
     
-#Xem lại câu trả lời
-class QuestionReview(BaseModel):
-    question_id: str
-    question_text: str
-    student_answer: Optional[str]  # Answer text or None if not answered
-    correct_answer: str
-    correct: bool  
-class QuizReviewResponse(BaseModel):
-    quiz_id: str
-    title: str
-    score: float
-    questions: List[QuestionReview]
 @router.get("/api/quiz/{quiz_id}/review", response_model=QuizReviewResponse, tags=["Quizzes"])
 def review_quiz(
     quiz_id: str,
@@ -392,12 +332,7 @@ def review_quiz(
         score=student_score.score,
         questions=questions_review
     )
-class QuizDetailResponse1(BaseModel):
-    quiz_id: str
-    title: str
-    time_limit: int
-    due_date: datetime
-    questions: List[QuestionResponse]
+
 #API lấy thông tin chi tiết về các question
 @router.get("/api/quiz1/{quiz_id}", response_model=QuizDetailResponse1, tags=["Students"])
 def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
@@ -431,26 +366,14 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
         questions=question_responses
     )
 
-class QuizSummaryResponse(BaseModel):
-    quiz_id: str
-    title: str
-    students_with_scores: int
-    due_date: datetime
-    total_student: int
-    average_score: float
-    status: str 
-
 @router.get("/api/teacher/quizzes/score", response_model=List[QuizSummaryResponse], tags=["Quizzes"])
 def get_quizzes_by_teacher(
     class_id: int,
     db: Session = Depends(get_db),
     current_user: Teacher = Depends(get_current_user)
 ):
-    # Check if the current user is a teacher
     if not isinstance(current_user, Teacher):
         raise HTTPException(status_code=403, detail="Only teachers can access this endpoint.")
-
-    # Query to get quizzes assigned to the current teacher and specific class
     quiz_summaries = (
         db.query(
             Quiz.quiz_id,
@@ -468,8 +391,6 @@ def get_quizzes_by_teacher(
         .group_by(Quiz.quiz_id)
         .all()
     )
-
-    # Construct response data
     return [
         QuizSummaryResponse(
             quiz_id=quiz.quiz_id,

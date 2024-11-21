@@ -7,48 +7,9 @@ from models import Teacher, Subject, Admin, Class, Distribution, Feedback, Stude
 from auth import get_current_user
 import uuid
 from datetime import datetime
+from basemodel.FeedbackModel import FeedbackReply, FeedbackResponse, FeedbackCreate
 
 router = APIRouter()
-
-# Models
-class FeedbackReply(BaseModel):
-    feedback_id: str
-    context: str
-    teacher_id: Optional[str] = None
-    student_id: Optional[str] = None
-    class_id: int
-    subject_id: int
-    is_parents: int
-    parent_id: Optional[str] = None
-    created_at: datetime
-    teacher_name: Optional[str] = None
-    student_name: Optional[str] = None
-    name_subject: Optional[str] = None  # Tên môn học
-
-
-class FeedbackResponse(BaseModel):
-    feedback_id: str
-    context: str
-    teacher_id: Optional[str] = None
-    student_id: Optional[str] = None
-    class_id: int
-    subject_id: int
-    is_parents: int
-    parent_id: Optional[str] = None
-    created_at: datetime
-    replies: List[FeedbackReply] = []  # Danh sách phản hồi con
-    teacher_name: Optional[str] = None
-    student_name: Optional[str] = None
-    name_subject: Optional[str] = None  # Tên môn học
-
-
-class FeedbackCreate(BaseModel):
-    context: str
-    subject_id: Optional[int] = None
-    class_id: Optional[int] = None
-    parent_id: Optional[str] = None
-
-
 # API Endpoints
 @router.get("/api/feedback", response_model=List[FeedbackResponse], tags=["Feedback"])
 def get_feedback(

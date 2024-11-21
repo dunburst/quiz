@@ -11,13 +11,9 @@ from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
 from typing import List, Optional
 from sqlalchemy import desc
+from basemodel.NotificationModel import NotificationResponse
 router = APIRouter()
-class NotificationResponse(BaseModel):
-    noti_id: str
-    context: str
-    time: datetime
-    teacher_id: Optional[str] = None
-    student_id: Optional[str] = None
+
 @router.get("/api/notifications/", response_model=List[NotificationResponse], tags=["Notifications"])
 def read_user_notifications(current_user: BaseModel = Depends(get_current_user), db: Session = Depends(get_db)):
     # Check user role and fetch notifications accordingly

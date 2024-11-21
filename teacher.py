@@ -10,21 +10,10 @@ from sqlalchemy import asc
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
-
+from config import imageprofile
+from basemodel.TeacherModel import TeacherCreate, TeacherResponse, TeacherUpdate
 router = APIRouter()
 
-#Lấy thông tin giáo viên
-class TeacherResponse(BaseModel):
-    teacher_id: str
-    mateacher: str
-    gender: str
-    name: str
-    birth_date: datetime
-    email: str
-    phone_number: Optional[str]
-    image: Optional[str]
-    subject: str  # New field for subject name
-    classes: List[Dict[str, Union[str, int]]]  # Allow class_id to be str or int
 # API route to retrieve all teachers with their subject and class information
 @router.get("/api/teachers", response_model=Page[TeacherResponse], tags=["Teachers"])
 def get_all_teachers(
@@ -37,17 +26,11 @@ def get_all_teachers(
 
     # Fetch all teachers sorted by mateacher in ascending order
     teachers = db.query(Teacher).order_by(asc(Teacher.mateacher)).all()
-
-    # Check if no teachers are found
     if not teachers:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No teachers found")
-
     teacher_data = []
     for teacher in teachers:
-        # Retrieve subject name
         subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
-        
-        # Retrieve class information for each teacher
         distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
         class_info = []
         for distribution in distributions:
@@ -57,8 +40,6 @@ def get_all_teachers(
                     "class_id": class_data.class_id,
                     "name_class": class_data.name_class
                 })
-        
-        # Append teacher data including subject and classes
         teacher_data.append({
             "teacher_id": teacher.teacher_id,
             "mateacher": teacher.mateacher,
@@ -110,79 +91,9 @@ def get_teacher_detail(
         "classes": class_info
     }
 
-# Model để nhận thông tin cập nhật từ người dùng
-class TeacherUpdateRequest(BaseModel):
-    mateacher: Optional[str] = None
-    gender: Optional[str] = None
-    name: Optional[str] = None
-    birth_date: Optional[datetime] = None
-    email: Optional[str] = None
-    phone_number: Optional[str] = None
-    image: Optional[str] = None
-    subject_id: Optional[int] = None
-@router.put("/api/teachers/{teacher_id}", response_model=TeacherResponse, tags=["Teachers"])
-def update_teacher(
-    teacher_id: str,
-    request: TeacherUpdateRequest,
-    db: Session = Depends(get_db),
-    current_user: Admin = Depends(get_current_user)
-):
-    if not isinstance(current_user, Admin):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update teacher information")
-    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
-    if not teacher:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found")
-    if request.mateacher:
-        teacher.mateacher = request.mateacher
-    if request.gender:
-        teacher.gender = request.gender
-    if request.name:
-        teacher.name = request.name
-    if request.birth_date:
-        teacher.birth_date = request.birth_date
-    if request.email:
-        teacher.email = request.email
-    if request.phone_number:
-        teacher.phone_number = request.phone_number
-    if request.image:
-        teacher.image = request.image
-    if request.subject_id:
-        teacher.subject_id = request.subject_id
-    db.commit()
-    subject = db.query(Subject).filter(Subject.subject_id == teacher.subject_id).first()
-    distributions = db.query(Distribution).filter(Distribution.teacher_id == teacher.teacher_id).all()
-    class_info = []
-    for distribution in distributions:
-        class_data = db.query(Class).filter(Class.class_id == distribution.class_id).first()
-        if class_data:
-            class_info.append({
-                "class_id": class_data.class_id,
-                "name_class": class_data.name_class
-            })
-    return {
-        "teacher_id": teacher.teacher_id,
-        "mateacher": teacher.mateacher,
-        "gender": teacher.gender,
-        "name": teacher.name,
-        "birth_date": teacher.birth_date,
-        "email": teacher.email,
-        "phone_number": teacher.phone_number,
-        "image": teacher.image,
-        "subject": subject.name_subject if subject else "Unknown",
-        "classes": class_info
-    }
 
-# Thêm giáo viên
-class TeacherCreate(BaseModel):
-    mateacher: str
-    name: str
-    gender: str
-    birth_date: datetime
-    email: str
-    phone_number: Optional[str]
-    subject_id: int
-    password: str
-    class_ids: List[int]  
+
+
 @router.post("/api/post/teachers", tags=["Teachers"])
 def create_teacher(
     teacher_data: TeacherCreate, 
@@ -213,7 +124,7 @@ def create_teacher(
         phone_number=teacher_data.phone_number,
         subject_id=teacher_data.subject_id,
         password=hash_password(teacher_data.password),  # Mã hóa mật khẩu
-        image="https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877"  # Ảnh mặc định
+        image=imageprofile  # Ảnh mặc định
     )
     try:
         db.add(new_teacher)
@@ -240,17 +151,7 @@ def create_teacher(
         "mateacher": new_teacher.mateacher
     }
 
-# Update giáo viên
-class TeacherUpdate(BaseModel):
-    teacher_id: str
-    name: Optional[str] = None
-    gender: Optional[str] = None
-    birth_date: Optional[datetime] = None
-    email: Optional[str] = None
-    phone_number: Optional[str] = None
-    subject_id: Optional[int] = None
-    password: Optional[str] = None
-    class_ids: Optional[List[int]] = None  
+
 @router.put("/api/put/teachers/{teacher_id}", tags=["Teachers"])
 def update_teacher(
     teacher_data: TeacherUpdate, 
@@ -264,6 +165,8 @@ def update_teacher(
     if not teacher:
         raise HTTPException(status_code=404, detail="Không tìm thấy giáo viên")
     # Cập nhật các thông tin của giáo viên nếu có
+    if teacher_data.mateacher is not None:
+        teacher.mastudent = teacher_data.mateacher
     if teacher_data.name is not None:
         teacher.name = teacher_data.name
     if teacher_data.gender is not None:
@@ -353,24 +256,20 @@ def search_teachers(
 
     return paginate(teacher_data, params)
 
-    
 
 @router.get("/api/teacher/subjects", tags=["Classes"])
 def get_classes_for_teacher(db: Session = Depends(get_db), current_user: Admin = Depends(get_current_user)):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can access this resource")
-
     # Lấy tất cả các môn học
     subjects = db.query(Subject).all()
     if not subjects:
         raise HTTPException(status_code=404, detail="Không tìm thấy môn nào")
-
     subject_data = []
     for subject in subjects:
         subject_data.append({
             "subject_id": subject.subject_id,
             "name_subject": subject.name_subject,
         })
-
     return {
         "subjects": subject_data  }

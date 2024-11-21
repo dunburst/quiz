@@ -12,7 +12,11 @@ from datetime import datetime
 from fastapi_pagination import Page, Params, paginate
 from quiz import AnswerResponse, QuestionResponse, QuizDetailResponse
 from collections import defaultdict
+from config import imageprofile
+from basemodel.StudentModel import StudentCreate, StudentResponse, StudentUpdate, QuizResponse, SubjectQuizzesResponse, StudentScoreResponse
+
 router = APIRouter()
+
 def update_total_students(class_id: int, db: Session):
     total_students = db.query(Student).filter(Student.class_id == class_id).count()
     class_obj = db.query(Class).filter(Class.class_id == class_id).first()
@@ -20,7 +24,6 @@ def update_total_students(class_id: int, db: Session):
         class_obj.total_student = total_students
         db.commit()
 # Lấy thông tin học sinh
-# Define StudentResponse model to include 'name_class'
 class StudentResponse(BaseModel):
     student_id: str
     mastudent: str
@@ -69,6 +72,7 @@ def get_all_students(
         student_list.append(student_info)
     # Paginate and return the response
     return paginate(student_list, params)
+    
 #Chi tiết người dùng
 @router.get("/api/student/{student_id}", response_model=StudentResponse, tags=["Students"])
 def get_student_details(
@@ -102,16 +106,7 @@ def get_student_details(
     return student_info
 
 
-# Thêm học sinh
-class StudentCreate(BaseModel):
-    mastudent: str
-    name: str
-    gender: str
-    birth_date: datetime
-    email: str
-    phone_number: str
-    class_id: int
-    password: str
+
 @router.post("/api/post/students", tags=["Students"])
 def create_student(
     student_data: StudentCreate, 
@@ -138,7 +133,7 @@ def create_student(
         phone_number=student_data.phone_number,
         class_id=student_data.class_id,
         password=hash_password(student_data.password),
-        image="https://cdn.glitch.global/83bcea06-7c19-41ce-bb52-ae99ba3f0bd0/JaZBMzV14fzRI4vBWG8jymplSUGSGgimkqtJakOV.jpeg?vUB=1728536441877",
+        image=imageprofile,
         first_login=True
     )
     try:
@@ -152,17 +147,6 @@ def create_student(
     
     return {"message": "Tạo tài khoản học sinh thành công", "student_id": new_student.student_id}
 
-# Update học sinh
-class StudentUpdate(BaseModel):
-    student_id: str
-    mastudent : Optional[str] = None
-    name: str = None
-    gender: str = None
-    birth_date: datetime = None
-    email: str = None
-    phone_number: str = None
-    class_id: int = None
-    password: str = None
 @router.put("/api/put/students/{student_id}", tags=["Students"])
 def update_student(
     student_data: StudentUpdate, 
@@ -275,22 +259,6 @@ def get_student_class_subject_teacher(
         "subjects": subjects_data
     }
 
-
-class QuizResponse(BaseModel):
-    quiz_id: str  
-    title: str
-    due_date: datetime  
-    time_limit: int
-    question_count: int
-    status: str
-    score: Optional[float]  # Có thể là None nếu chưa có điểm
-    teacher_id: str  # Thay đổi theo kiểu dữ liệu thực tế nếu cần
-
-class SubjectQuizzesResponse(BaseModel):
-    subject_id: int
-    subject_name: str
-    quizzes: List[QuizResponse]
-
 @router.get("/api/quizzes/{subject_id}", response_model=Page[dict], tags=["Students"])
 def get_quizzes_by_subject(
     subject_id: int,
@@ -344,14 +312,8 @@ def get_quizzes_by_subject(
             "teacher_id": quiz.teacher_id
         }
         quiz_details.append(quiz_info)
-
-    # Paginate và trả về danh sách quiz
     return paginate(quiz_details, params)
 
-class StudentScoreResponse(BaseModel):
-    student_id: str
-    student_name: str
-    scores: dict  # Dạng {quiz_title: score}
 
 # API to get students and scores by class_id
 @router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Teachers"])
@@ -363,21 +325,17 @@ def get_class_students_scores(
     # Xác nhận người dùng có quyền truy cập
     if not isinstance(current_user, Teacher):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teacher can access this resource")
-
     # Kiểm tra nếu lớp tồn tại
     class_obj = db.query(Class).filter(Class.class_id == class_id).first()
     if not class_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
-
     # Lấy danh sách học sinh trong lớp
     students = db.query(Student).filter(Student.class_id == class_id).all()
     if not students:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found in this class")
-
     # Lấy danh sách các quiz của lớp
     quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id, Quiz.teacher_id==current_user.teacher_id).all()
     quiz_titles = {quiz.quiz_id: quiz.title for quiz in quizzes}
-
     # Tạo kết quả cho từng học sinh
     student_scores = []
     for student in students:
@@ -388,12 +346,10 @@ def get_class_students_scores(
         for quiz_id, quiz_title in quiz_titles.items():
             if quiz_title not in score_dict:
                 score_dict[quiz_title] = None
-
         # Thêm vào danh sách kết quả
         student_scores.append(StudentScoreResponse(
             student_id=student.student_id,
             student_name=student.name,
             scores=score_dict
         ))
-
     return student_scores
