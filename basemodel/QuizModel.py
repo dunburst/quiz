@@ -90,3 +90,4 @@ class QuizSummaryResponse(BaseModel):
     total_student: int
     average_score: float
     status: str 
+

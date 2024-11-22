@@ -239,13 +239,15 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db), current_user: 
         questions=question_responses
     )
 
-
+class QuizRequest(BaseModel):
+    quiz_id: str
 @router.post("/api/quiz/doquiz", tags=["Quizzes"])
 def do_quiz(
-    quiz_id: str,
+    request: QuizRequest,
     current_user: Student = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    quiz_id = request.quiz_id  # Lấy quiz_id từ payload
     # Kiểm tra xem học sinh đã tham gia quiz này chưa
     class_quiz = db.query(Class_quiz).join(Class).filter(
         Class.class_id == current_user.class_id, Class_quiz.quiz_id == quiz_id

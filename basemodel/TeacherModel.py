@@ -38,5 +38,4 @@ class TeacherUpdate(BaseModel):
     email: Optional[str] = None
     phone_number: Optional[str] = None
     subject_id: Optional[int] = None
-    password: Optional[str] = None
     class_ids: Optional[List[int]] = None  

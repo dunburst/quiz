@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from database import get_db
 from models import Student, Class, Admin, Distribution, Subject, Teacher, Class_quiz, Questions, Quiz, Score
-from auth import hash_password, get_current_user
+from auth import hash_password, get_current_user, verify_password
 import uuid
 from sqlalchemy import asc 
 from sqlalchemy.exc import IntegrityError
@@ -23,19 +23,7 @@ def update_total_students(class_id: int, db: Session):
     if class_obj:
         class_obj.total_student = total_students
         db.commit()
-# Lấy thông tin học sinh
-class StudentResponse(BaseModel):
-    student_id: str
-    mastudent: str
-    gender: str
-    name: str
-    birth_date: datetime
-    email: str
-    phone_number: str
-    image: str
-    class_id: int
-    name_class: str  # New field for class name
-    first_login: bool
+
 
 # API route to retrieve all students
 @router.get("/api/students", response_model=Page[StudentResponse], tags=["Students"])
@@ -68,6 +56,7 @@ def get_all_students(
             "class_id": student.class_id,
             "name_class": classe.name_class if classe else "Unknown",
             "first_login": student.first_login
+
         }
         student_list.append(student_info)
     # Paginate and return the response
@@ -179,8 +168,6 @@ def update_student(
             raise HTTPException(status_code=404, detail="Không tìm thấy lớp học")
         student.class_id = student_data.class_id
         update_total_students(student_data.class_id, db)
-    if student_data.password is not None:
-        student.password = hash_password(student_data.password)
     try:
         db.commit()
         db.refresh(student)
@@ -259,7 +246,7 @@ def get_student_class_subject_teacher(
         "subjects": subjects_data
     }
 
-@router.get("/api/quizzes/{subject_id}", response_model=Page[dict], tags=["Students"])
+@router.get("/api/quizzes/{subject_id}", response_model=Page[dict], tags=["Students"]) 
 def get_quizzes_by_subject(
     subject_id: int,
     params: Params = Depends(),
@@ -289,15 +276,24 @@ def get_quizzes_by_subject(
     quiz_details = []
     for quiz in quizzes:
         score_entry = score_dict.get(quiz.quiz_id, None)
-        status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
+        
+        # Xác định trạng thái
+        if score_entry:
+            if score_entry.time_end and datetime.now() < score_entry.time_end:
+                status = "Continues"  # Nếu time_end chưa qua và quiz vẫn đang tiếp tục
+            elif quiz.due_date > datetime.now():
+                status = "Ongoing"  # Nếu quiz đang tiếp diễn
+            else:
+                status = "Expired"  # Nếu quiz đã hết hạn
+        else:
+            # Nếu không có điểm, kiểm tra nếu thời gian kết thúc đã qua
+            status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"
+        
         score = None
         
-        # Kiểm tra nếu quiz đang trong trạng thái 'Continues'
-        if score_entry and score_entry.status == "Continues":
-    
-            score = "Đang làm"
-        elif status == "Expired" and score_entry is None:
-            score = 0  # Nếu quiz đã hết hạn mà học sinh chưa làm bài, điểm là 0
+        # Nếu quiz đã hết hạn mà học sinh chưa làm bài, điểm là 0
+        if status == "Expired" and score_entry is None:
+            score = 0  # Điểm là 0 vì quiz đã hết hạn và học sinh chưa làm bài
             new_score = Score(
                 student_id=current_user.student_id,
                 quiz_id=quiz.quiz_id,
@@ -306,7 +302,14 @@ def get_quizzes_by_subject(
             db.add(new_score)
             db.commit()
         elif score_entry:
-            score = score_entry.score  # Lấy điểm đã lưu trong bảng Score
+            # Kiểm tra nếu time_end đã qua và chưa có điểm
+            if score_entry.score is None and score_entry.time_end and datetime.now() > score_entry.time_end:
+                score = 0  # Nếu thời gian kết thúc đã qua mà chưa có điểm, điểm = 0
+                score_entry.score = score  # Cập nhật điểm
+                score_entry.status = "Unfinished"
+                db.commit()
+            else:
+                score = score_entry.score  # Lấy điểm đã lưu trong bảng Score
         
         quiz_info = {
             "quiz_id": quiz.quiz_id,
@@ -324,40 +327,57 @@ def get_quizzes_by_subject(
 
 
 # API to get students and scores by class_id
-@router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Teachers"])
+@router.get("/api/class/{class_id}/students-scores", response_model=List[StudentScoreResponse], tags=["Students"])
 def get_class_students_scores(
     class_id: int,
     db: Session = Depends(get_db),
-    current_user : Teacher = Depends(get_current_user)
+    current_user: Teacher = Depends(get_current_user)
 ):
     # Xác nhận người dùng có quyền truy cập
     if not isinstance(current_user, Teacher):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only teacher can access this resource")
+    
     # Kiểm tra nếu lớp tồn tại
     class_obj = db.query(Class).filter(Class.class_id == class_id).first()
     if not class_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+    
     # Lấy danh sách học sinh trong lớp
     students = db.query(Student).filter(Student.class_id == class_id).all()
     if not students:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found in this class")
+    
     # Lấy danh sách các quiz của lớp
-    quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id, Quiz.teacher_id==current_user.teacher_id).all()
+    quizzes = db.query(Quiz).join(Class_quiz, Quiz.quiz_id == Class_quiz.quiz_id).filter(Class_quiz.class_id == class_id, Quiz.teacher_id == current_user.teacher_id).all()
     quiz_titles = {quiz.quiz_id: quiz.title for quiz in quizzes}
+    
     # Tạo kết quả cho từng học sinh
     student_scores = []
     for student in students:
         # Lấy điểm của học sinh cho các quiz
         scores = db.query(Score).filter(Score.student_id == student.student_id, Score.quiz_id.in_(quiz_titles.keys())).all()
         score_dict = {quiz_titles[score.quiz_id]: score.score for score in scores}
-        # Đảm bảo tất cả các quiz đều có mặt trong score_dict, nếu không thì thêm null
+        
+        # Đảm bảo tất cả các quiz đều có mặt trong score_dict, nếu không thì thêm null hoặc 0
         for quiz_id, quiz_title in quiz_titles.items():
             if quiz_title not in score_dict:
-                score_dict[quiz_title] = None
+                # Tìm quiz trong quiz_titles để kiểm tra thời gian kết thúc và trạng thái quiz
+                quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+                if quiz:
+                    # Xử lý trạng thái quiz dựa trên time_end và thời gian hiện tại
+                    score_dict[quiz_title] = None
+                    if quiz.due_date < datetime.now():  # Nếu quiz đã hết hạn
+                        score_dict[quiz_title] = 0  # Gán điểm là 0 nếu quiz đã hết hạn
+                    # Kiểm tra nếu quiz đã hết hạn nhưng học sinh chưa làm bài
+                    score_entry = db.query(Score).filter(Score.student_id == student.student_id, Score.quiz_id == quiz_id).first()
+                    if score_entry and score_entry.time_end and datetime.now() > score_entry.time_end and score_entry.score is None:
+                        score_dict[quiz_title] = 0  # Điểm = 0 nếu thời gian kết thúc đã qua và học sinh chưa làm bài
+
         # Thêm vào danh sách kết quả
         student_scores.append(StudentScoreResponse(
             student_id=student.student_id,
             student_name=student.name,
             scores=score_dict
         ))
+
     return student_scores

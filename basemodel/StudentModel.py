@@ -35,7 +35,6 @@ class StudentUpdate(BaseModel):
     email: str = None
     phone_number: str = None
     class_id: int = None
-    password: str = None
 
 class QuizResponse(BaseModel):
     quiz_id: str  

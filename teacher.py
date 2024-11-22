@@ -185,8 +185,6 @@ def update_teacher(
         if not subject_info:
             raise HTTPException(status_code=404, detail="Không tìm thấy môn học")
         teacher.subject_id = teacher_data.subject_id
-    if teacher_data.password is not None:
-        teacher.password = hash_password(teacher_data.password)
     # Cập nhật danh sách lớp của giáo viên nếu có
     if teacher_data.class_ids is not None:
         # Xóa các phân công lớp hiện tại của giáo viên
