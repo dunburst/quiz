@@ -445,7 +445,11 @@ def get_quizzes_by_teacher(
             due_date = quiz.due_date,
             total_student=quiz.total_student,
             average_score=round(quiz.average_score, 2) if quiz.average_score is not None else 0.0,
-            status="Ongoing" if quiz.due_date > datetime.now() else "Expired"
+            status=(
+                "Completed"
+                if quiz.students_with_scores == quiz.total_student
+                else ("Ongoing" if quiz.due_date > datetime.now() else "Expired")
+            )
         )
         for quiz in quiz_summaries
     ]
