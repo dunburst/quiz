@@ -281,6 +281,8 @@ def get_quizzes_by_subject(
         if score_entry:
             if score_entry.time_end and datetime.now() < score_entry.time_end:
                 status = "Continues"  # Nếu time_end chưa qua và quiz vẫn đang tiếp tục
+            elif score_entry.status == "Completed":  # Điều kiện mới
+                status = "Completed"
             elif quiz.due_date > datetime.now():
                 status = "Ongoing"  # Nếu quiz đang tiếp diễn
             else:
@@ -306,7 +308,7 @@ def get_quizzes_by_subject(
             if score_entry.score is None and score_entry.time_end and datetime.now() > score_entry.time_end:
                 score = 0  # Nếu thời gian kết thúc đã qua mà chưa có điểm, điểm = 0
                 score_entry.score = score  # Cập nhật điểm
-                score_entry.status = "Unfinished"
+                score_entry.status = "Completed"
                 db.commit()
             else:
                 score = score_entry.score  # Lấy điểm đã lưu trong bảng Score
