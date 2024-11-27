@@ -7,28 +7,33 @@ class AnswerCreate(BaseModel):
     answer: str
     is_correct: bool
 class QuestionCreate(BaseModel):
+    question_id: Optional[str] = None
     question_text: str
     answers: List[AnswerCreate]
 class ClassAssignment(BaseModel):
-    class_id: int
-class QuizCreate(BaseModel):
+    class_id: Optional[int] = None 
+class QuizWithQuestionsCreate(BaseModel):
     title: str
     due_date: datetime
     time_limit: int
-    question_count: int
-    class_assignments: List[ClassAssignment]  
+    class_assignments: List[ClassAssignment]
+    questions: List[QuestionCreate]
 
 #Class update
 class AnswerUpdate(BaseModel):
-    answer_id: str
-    answer: str
-    is_correct: bool
+    answer_id: Optional[str] = None
+    answer: Optional[str] = None
+    is_correct: Optional[bool] = None
 class QuestionUpdate(BaseModel):
-    question_id: str
-    question_text: str
+    question_id: Optional[str] = None
+    question_text: Optional[str] = None
     answers: List[AnswerUpdate]
-class UpdateQuestion(BaseModel):
-    question: List[QuestionUpdate]
+class UpdateQuizAndQuestions(BaseModel):
+    title: Optional[str]
+    time_limit: Optional[int]
+    due_date: Optional[datetime]
+    class_assignments: List[ClassAssignment]
+    questions: List[QuestionUpdate]
 
 # Các mô hình dữ liệu
 class AnswerResponse(BaseModel):
@@ -42,6 +47,10 @@ class QuestionResponse(BaseModel):
 class QuizDetailResponse(BaseModel):
     quiz_id: str
     title: str
+    time_limit: int
+    due_date: Optional[datetime]
+    question_count: int
+    class_assignments: List[ClassAssignment]
     questions: List[QuestionResponse]
 
 
@@ -91,3 +100,5 @@ class QuizSummaryResponse(BaseModel):
     average_score: float
     status: str 
 
+class QuizRequest(BaseModel):
+    quiz_id: str

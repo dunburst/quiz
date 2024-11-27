@@ -283,10 +283,12 @@ def get_quizzes_by_subject(
                 status = "Continues"  # Nếu time_end chưa qua và quiz vẫn đang tiếp tục
             elif score_entry.status == "Completed":  # Điều kiện mới
                 status = "Completed"
+            elif quiz.due_date > datetime.now() and score_entry.status == None:
+                status = "Expired"    
             elif quiz.due_date > datetime.now():
-                status = "Ongoing"  # Nếu quiz đang tiếp diễn
+                status = "Ongoing"  
             else:
-                status = "Expired"  # Nếu quiz đã hết hạn
+                status = "Expired"  
         else:
             # Nếu không có điểm, kiểm tra nếu thời gian kết thúc đã qua
             status = "Ongoing" if quiz.due_date > datetime.now() else "Expired"

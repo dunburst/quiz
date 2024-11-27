@@ -10,8 +10,21 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from fastapi_pagination import Page, Params, paginate
-from basemodel.QuizModel import AnswerCreate, QuestionCreate, ClassAssignment, QuizCreate, AnswerUpdate, QuestionUpdate, UpdateQuestion, AnswerResponse, QuestionResponse, QuizDetailResponse, AnswerSubmission, QuizSubmission, QuestionReview, QuizReviewResponse, QuizDetailResponse1,AnswerResponse1, QuestionResponse1, QuizSummaryResponse
+from basemodel.QuizModel import AnswerCreate, QuestionCreate, ClassAssignment, QuizWithQuestionsCreate, AnswerUpdate, QuestionUpdate, UpdateQuizAndQuestions, AnswerResponse, QuestionResponse, QuizDetailResponse, AnswerSubmission, QuizSubmission, QuestionReview, QuizReviewResponse, QuizDetailResponse1,AnswerResponse1, QuestionResponse1, QuizSummaryResponse,QuizRequest
 router = APIRouter()
+
+#Tính số lượng câu hỏi trong mỗi quiz
+def update_question_count(quiz_id: str, db: Session):
+ # Đếm số lượng câu hỏi trong quiz
+    question_count = db.query(func.count(Questions.question_id)).filter(
+        Questions.quiz_id == quiz_id
+    ).scalar()
+    # Cập nhật `question_count` trong bảng `quiz`
+    quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail=f"Quiz với ID {quiz_id} không tồn tại.")
+    quiz.question_count = question_count
+    db.commit()
 
 #API lấy thông tin bài tập của giáo viên 
 @router.get("/api/teacher/quizzes", response_model=Page[dict], tags=["Quizzes"])
@@ -46,35 +59,33 @@ def get_teacher_quizzes(
         quiz_list.append(quiz_info)
     # Return paginated quiz list
     return paginate(quiz_list, params)
+
 #API create quiz
-@router.post("/api/post/quizzes", tags=["Quizzes"]) 
-def create_quiz(
-    quiz_data: QuizCreate, 
-    db: Session = Depends(get_db), 
+@router.post("/api/post/quizzes-with-questions", tags=["Quizzes"])
+def create_quiz_with_questions(
+    quiz_data: QuizWithQuestionsCreate,  # Dữ liệu chứa thông tin quiz và danh sách câu hỏi
+    db: Session = Depends(get_db),
     current_user: Teacher = Depends(get_current_user)
 ):
     # Kiểm tra nếu người dùng hiện tại là giáo viên
     if not isinstance(current_user, Teacher):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ giáo viên mới có quyền tạo quiz.")
-    
     # Tạo một quiz mới
     new_quiz = Quiz(
         title=quiz_data.title,
         due_date=quiz_data.due_date,
         time_limit=quiz_data.time_limit,
-        question_count=quiz_data.question_count,  
+        question_count=len(quiz_data.questions),  # Số lượng câu hỏi
         teacher_id=current_user.teacher_id
     )
     db.add(new_quiz)
     db.commit()
     db.refresh(new_quiz)
-
     # Phân công quiz cho từng lớp đã chỉ định và tạo thông báo cho học sinh
     for assignment in quiz_data.class_assignments:
         class_obj = db.query(Class).filter(Class.class_id == assignment.class_id).first()
         if not class_obj:
             raise HTTPException(status_code=404, detail=f"Lớp với ID {assignment.class_id} không tồn tại.")
-        
         # Tạo bản phân công quiz cho lớp
         new_class_quiz = Class_quiz(
             class_quiz_id=str(uuid.uuid4()), 
@@ -82,7 +93,6 @@ def create_quiz(
             quiz_id=new_quiz.quiz_id
         )
         db.add(new_class_quiz)
-        
         # Lấy danh sách học sinh trong lớp và tạo thông báo cho từng học sinh
         students = db.query(Student).filter(Student.class_id == assignment.class_id).all()
         for student in students:
@@ -93,46 +103,20 @@ def create_quiz(
                 student_id=student.student_id
             )
             db.add(notification)
-    
-    db.commit()
-    
-    return {
-        "message": "Quiz đã được tạo, phân công cho các lớp và gửi thông báo thành công",
-        "quiz_id": new_quiz.quiz_id
-    }
-    
-# API tạo hàng loạt câu hỏi
-@router.post("/api/post/answers/{quiz_id}", tags=["Quizzes"])
-def create_questions_for_quiz(
-    quiz_id: str, 
-    questions_data: List[QuestionCreate],  # Chấp nhận danh sách câu hỏi
-    db: Session = Depends(get_db),
-    current_user: Teacher = Depends(get_current_user)
-):
-    quiz_info = db.query(Quiz).filter(
-        Quiz.quiz_id == quiz_id,
-        Quiz.teacher_id == current_user.teacher_id
-    ).first()
-    
-    if not quiz_info:
-        raise HTTPException(status_code=404, detail="Không tìm thấy quiz hoặc bạn không sở hữu quiz này")
-    
-    # Đếm số câu hỏi đã thêm
-    added_questions = []
-    
-    for question_data in questions_data:
+    # Tạo danh sách câu hỏi và câu trả lời
+    for question_data in quiz_data.questions:
         new_question = Questions(
-            quiz_id=quiz_id,
+            quiz_id=new_quiz.quiz_id,
             question_text=question_data.question_text
         )
         db.add(new_question)
         db.commit()
         db.refresh(new_question)
-        
+        # Kiểm tra số lượng câu trả lời đúng
         correct_answers = [ans for ans in question_data.answers if ans.is_correct]
         if len(correct_answers) != 1:
             raise HTTPException(status_code=400, detail="Mỗi câu hỏi phải có đúng một câu trả lời chính xác.")
-        
+        # Thêm câu trả lời
         for answer_data in question_data.answers:
             new_answer = Answer(
                 question_id=new_question.question_id,
@@ -140,81 +124,112 @@ def create_questions_for_quiz(
                 is_correct=answer_data.is_correct
             )
             db.add(new_answer)
-
-        # Lưu câu hỏi vừa tạo
-        added_questions.append(new_question)
+    update_question_count(new_quiz.quiz_id, db)
     db.commit()
-    
     return {
-        "message": "Tạo câu hỏi và câu trả lời thành công",
-        "questions": [{"question_id": question.question_id} for question in added_questions]
+        "message": "Quiz và các câu hỏi đã được tạo thành công.",
+        "quiz_id": new_quiz.quiz_id,
+        "questions": [{"question_id": question.question_id} for question in quiz_data.questions]
     }
+    
 #Update lại
 @router.put("/api/put/quizzes/{quiz_id}", tags=["Quizzes"])
-def update_question_for_quiz(
+def update_quiz_and_questions(
     quiz_id: str,
-    update_data: UpdateQuestion,
+    update_data: UpdateQuizAndQuestions,
     db: Session = Depends(get_db),
     current_user: Teacher = Depends(get_current_user)
 ):
-    quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id, Quiz.teacher_id == current_user.teacher_id).first()
+    # Lấy thông tin quiz
+    quiz = db.query(Quiz).filter(
+        Quiz.quiz_id == quiz_id,
+        Quiz.teacher_id == current_user.teacher_id
+    ).first()
     if not quiz:
-        raise HTTPException(status_code=404, detail="Không tìm thấy quiz hoặc bạn không sở hữu quiz này")
-
-    for question_data in update_data.question:
-        # Tìm câu hỏi tương ứng
-        question_info = db.query(Questions).filter(
+        raise HTTPException(status_code=404, detail="Không tìm thấy quiz hoặc bạn không sở hữu quiz này.")
+    # Cập nhật thông tin quiz
+    if update_data.title:
+        quiz.title = update_data.title
+    if update_data.time_limit is not None:
+        quiz.time_limit = update_data.time_limit
+    if update_data.due_date:
+        quiz.due_date = update_data.due_date
+    # Cập nhật class assignments (xóa và thêm mới)
+    db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz_id).delete()
+    for assignment in update_data.class_assignments:
+        new_class_quiz = Class_quiz(
+            class_quiz_id=str(uuid.uuid4()),
+            class_id=assignment.class_id,
+            quiz_id=quiz_id
+        )
+        db.add(new_class_quiz)
+    # Danh sách ID câu hỏi cần giữ lại
+    question_ids_to_keep = {q.question_id for q in update_data.questions}
+    # Lấy danh sách câu hỏi hiện tại của quiz và xóa các câu hỏi không còn tồn tại
+    existing_questions = db.query(Questions).filter(Questions.quiz_id == quiz_id).all()
+    for question in existing_questions:
+        if question.question_id not in question_ids_to_keep:
+            db.query(Answer).filter(Answer.question_id == question.question_id).delete()
+            db.delete(question)
+    # Cập nhật hoặc thêm mới câu hỏi và câu trả lời
+    for question_data in update_data.questions:
+        question = db.query(Questions).filter(
             Questions.question_id == question_data.question_id,
-            Questions.quiz_id == quiz_id  # Giữ quiz_id cố định
+            Questions.quiz_id == quiz_id
         ).first()
-        if not question_info:
-            raise HTTPException(status_code=404, detail=f"Câu hỏi {question_data.question_id} không tồn tại.")
-        
-        # Cập nhật các trường không phải khóa ngoại
-        if question_data.question_text:
-            question_info.question_text = question_data.question_text
-        
-        # Kiểm tra và cập nhật câu trả lời
-        correct_answers = [ans for ans in question_data.answers if ans.is_correct]
-        if len(correct_answers) != 1:
-            raise HTTPException(status_code=400, detail=f"Câu hỏi {question_data.question_id} phải có đúng một câu trả lời chính xác.")
 
-        # Cập nhật hoặc thêm câu trả lời mới
+        if question:
+            question.question_text = question_data.question_text
+        else:
+            question = Questions(
+                quiz_id=quiz_id,
+                question_text=question_data.question_text
+            )
+            db.add(question)
+            db.commit()
+            db.refresh(question)
+        # Cập nhật hoặc thêm mới câu trả lời
+        existing_answers = db.query(Answer).filter(Answer.question_id == question.question_id).all()
+        answer_ids_to_keep = {a.answer_id for a in question_data.answers}
+        for answer in existing_answers:
+            if answer.answer_id not in answer_ids_to_keep:
+                db.delete(answer)
         for answer_data in question_data.answers:
             existing_answer = db.query(Answer).filter(
-                Answer.question_id == question_data.question_id,
-                Answer.answer_id == answer_data.answer_id  # Kiểm tra theo answer_id
+                Answer.answer_id == answer_data.answer_id,
+                Answer.question_id == question.question_id
             ).first()
-
             if existing_answer:
-                # Nếu câu trả lời đã tồn tại, chỉ cần cập nhật
                 existing_answer.answer = answer_data.answer
                 existing_answer.is_correct = answer_data.is_correct
             else:
-                # Nếu không tồn tại, thêm câu trả lời mới
                 new_answer = Answer(
-                    question_id=question_data.question_id,  # Không thay đổi question_id
+                    question_id=question.question_id,
                     answer=answer_data.answer,
                     is_correct=answer_data.is_correct
                 )
                 db.add(new_answer)
-
+    # Cập nhật lại số lượng câu hỏi cho quiz
     db.commit()
-
-    return {
-        "message": "Cập nhật câu hỏi và câu trả lời thành công"
-    }
+    update_question_count(quiz_id, db)
+    return {"message": "Cập nhật quiz, câu hỏi và câu trả lời thành công."}
     
 #API lấy thông tin chi tiết về các question
 @router.get("/api/quiz/{quiz_id}", response_model=QuizDetailResponse, tags=["Quizzes"])
-def get_quiz_details(quiz_id: str, db: Session = Depends(get_db), current_user: Teacher = Depends(get_current_user)):
+def get_quiz_details(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    current_user: Teacher = Depends(get_current_user)
+):
     # Lấy thông tin quiz
-    quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id, Quiz.teacher_id == current_user.teacher_id).first()
+    quiz = db.query(Quiz).filter(
+        Quiz.quiz_id == quiz_id,
+        Quiz.teacher_id == current_user.teacher_id
+    ).first()
     if not quiz:
-        raise HTTPException(status_code=404, detail="Không tìm thấy quiz hoặc bạn không sở hữu quiz này")
-    # Lấy các câu hỏi thuộc về quiz
+        raise HTTPException(status_code=404, detail="Không tìm thấy quiz hoặc bạn không sở hữu quiz này.")
+    # Lấy danh sách câu hỏi và câu trả lời
     questions = db.query(Questions).filter(Questions.quiz_id == quiz_id).all()
-    # Tạo danh sách câu hỏi và câu trả lời tương ứng
     question_responses = []
     for question in questions:
         answers = db.query(Answer).filter(Answer.question_id == question.question_id).all()
@@ -231,16 +246,21 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db), current_user: 
             question_text=question.question_text,
             answers=answer_responses
         ))
-
-    # Tạo và trả về thông tin quiz chi tiết
+    # Lấy danh sách các lớp được phân công
+    class_assignments = db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz_id).all()
+    class_responses = [ClassAssignment(class_id=assignment.class_id) for assignment in class_assignments]
+    # Trả về thông tin chi tiết quiz
     return QuizDetailResponse(
         quiz_id=quiz.quiz_id,
-        title=quiz.title,  # Giả định có trường title trong Quiz
+        title=quiz.title,
+        time_limit=quiz.time_limit,
+        due_date=quiz.due_date,
+        question_count=quiz.question_count,
+        class_assignments=class_responses,
         questions=question_responses
     )
 
-class QuizRequest(BaseModel):
-    quiz_id: str
+
 @router.post("/api/quiz/doquiz", tags=["Quizzes"])
 def do_quiz(
     request: QuizRequest,
@@ -333,7 +353,7 @@ def submit_quiz(
         "score": score,
     }
     
-@router.get("/api/quiz/{quiz_id}/review", response_model=QuizReviewResponse, tags=["Quizzes"])
+@router.get("/api/quizzes/{quiz_id}/review", response_model=QuizReviewResponse, tags=["Quizzes"])
 def review_quiz(
     quiz_id: str,
     current_user: Student = Depends(get_current_user),
