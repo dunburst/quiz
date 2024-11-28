@@ -453,3 +453,90 @@ def get_quizzes_by_teacher(
         )
         for quiz in quiz_summaries
     ]
+
+
+
+#Class create
+class AnswerCreate(BaseModel):
+    answer: str
+    is_correct: bool
+class QuestionCreate(BaseModel):
+    question_text: str
+    answers: List[AnswerCreate]
+class ClassAssignment(BaseModel):
+    class_id: Optional[int] = None 
+class QuizWithQuestionsCreate(BaseModel):
+    title: str
+    due_date: datetime
+    time_limit: int
+    question_count: int
+    class_assignments: List[ClassAssignment]
+    questions: List[QuestionCreate]
+@router.post("/api/post/quizzes-with-questions", tags=["Quizzes"])
+def create_quiz_with_questions(
+    quiz_data: QuizWithQuestionsCreate,  # Dữ liệu chứa thông tin quiz và danh sách câu hỏi
+    db: Session = Depends(get_db),
+    current_user: Teacher = Depends(get_current_user)
+):
+    # Kiểm tra nếu người dùng hiện tại là giáo viên
+    if not isinstance(current_user, Teacher):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ giáo viên mới có quyền tạo quiz.")
+    # Tạo một quiz mới
+    new_quiz = Quiz(
+        title=quiz_data.title,
+        due_date=quiz_data.due_date,
+        time_limit=quiz_data.time_limit,
+        question_count=quiz_data.question_count,  # Số lượng câu hỏi
+        teacher_id=current_user.teacher_id
+    )
+    db.add(new_quiz)
+    db.commit()
+    db.refresh(new_quiz)
+    # Phân công quiz cho từng lớp đã chỉ định và tạo thông báo cho học sinh
+    for assignment in quiz_data.class_assignments:
+        class_obj = db.query(Class).filter(Class.class_id == assignment.class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail=f"Lớp với ID {assignment.class_id} không tồn tại.")
+        # Tạo bản phân công quiz cho lớp
+        new_class_quiz = Class_quiz(
+            class_quiz_id=str(uuid.uuid4()), 
+            class_id=assignment.class_id,
+            quiz_id=new_quiz.quiz_id
+        )
+        db.add(new_class_quiz)
+        # Lấy danh sách học sinh trong lớp và tạo thông báo cho từng học sinh
+        students = db.query(Student).filter(Student.class_id == assignment.class_id).all()
+        for student in students:
+            notification = Notification(
+                noti_id=str(uuid.uuid4()),
+                context=f"Một quiz mới '{new_quiz.title}' đã được giao và hạn nộp vào {new_quiz.due_date}.",
+                time=datetime.now(),
+                student_id=student.student_id
+            )
+            db.add(notification)
+    # Tạo danh sách câu hỏi và câu trả lời
+    for question_data in quiz_data.questions:
+        new_question = Questions(
+            quiz_id=new_quiz.quiz_id,
+            question_text=question_data.question_text
+        )
+        db.add(new_question)
+        db.commit()
+        db.refresh(new_question)
+        # Kiểm tra số lượng câu trả lời đúng
+        correct_answers = [ans for ans in question_data.answers if ans.is_correct]
+        if len(correct_answers) != 1:
+            raise HTTPException(status_code=400, detail="Mỗi câu hỏi phải có đúng một câu trả lời chính xác.")
+        # Thêm câu trả lời
+        for answer_data in question_data.answers:
+            new_answer = Answer(
+                question_id=new_question.question_id,
+                answer=answer_data.answer,
+                is_correct=answer_data.is_correct
+            )
+            db.add(new_answer)
+    db.commit()
+    return {
+        "message": "Quiz và các câu hỏi đã được tạo thành công.",
+        "quiz_id": new_quiz.quiz_id,
+    }
