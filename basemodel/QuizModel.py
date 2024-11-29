@@ -10,13 +10,14 @@ class QuestionCreate(BaseModel):
     question_text: str
     answers: List[AnswerCreate]
 class ClassAssignment(BaseModel):
-    class_id: int
-class QuizCreate(BaseModel):
+    class_id: Optional[int] = None 
+class QuizWithQuestionsCreate(BaseModel):
     title: str
     due_date: datetime
     time_limit: int
     question_count: int
-    class_assignments: List[ClassAssignment]  
+    class_assignments: List[ClassAssignment]
+    questions: List[QuestionCreate] 
 
 #Class update
 class AnswerUpdate(BaseModel):
@@ -91,3 +92,5 @@ class QuizSummaryResponse(BaseModel):
     average_score: float
     status: str 
 
+class QuizRequest(BaseModel):
+    quiz_id: str

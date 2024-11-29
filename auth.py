@@ -8,11 +8,13 @@ from models import Student, Teacher, Admin, Class, Subject
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from uuid import uuid4
+import aiohttp
 import os
 from typing import Optional, Union
 import uuid
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH, CLIENT_ID1
 from basemodel.AuthModel import TokenData, Token, ChangeRespone
+
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -132,32 +134,87 @@ def read_users_me(current_user: BaseModel = Depends(get_current_user), db: Sessi
         
 
 #Upload avatar
+# @router.post("/users/me/avatar")
+# async def upload_avatar(
+#     file: UploadFile = File(...),
+#     db: Session = Depends(get_db),
+#     current_user: BaseModel = Depends(get_current_user)
+# ):
+#     # Kiểm tra nếu người dùng là học sinh hoặc giáo viên
+#     if not isinstance(current_user, (Student, Teacher)):
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh và giáo viên mới có thể thay đổi ảnh đại diện")
+#     # Kiểm tra đuôi tệp ảnh
+#     if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
+#         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Định dạng ảnh không hợp lệ")
+#     # Xóa ảnh cũ nếu tồn tại
+#     if current_user.image:
+#         old_file_path = os.path.join(AVATAR_UPLOAD_PATH, current_user.image)
+#         if os.path.exists(old_file_path):
+#             os.remove(old_file_path)
+#     # Tạo tên tệp duy nhất và xác định đường dẫn lưu
+#     file_extension = file.filename.split(".")[-1]
+#     new_filename = f"{uuid4()}.{file_extension}"
+#     file_path = os.path.join(AVATAR_UPLOAD_PATH, new_filename)
+#     # Lưu tệp ảnh mới vào thư mục đích
+#     with open(file_path, "wb") as buffer:
+#         buffer.write(await file.read())
+#     # Cập nhật đường dẫn ảnh vào cơ sở dữ liệu của người dùng
+#     image_url = new_filename  # Đường dẫn lưu trữ
+#     current_user.image = image_url
+#     db.commit()
+#     return {"message": "Tải lên ảnh thành công", "image_url": image_url}
+
+async def upload_image_to_imgur(file: UploadFile):
+    CLIENT_ID = CLIENT_ID1
+    headers = {
+        'Authorization': f'Client-ID {CLIENT_ID}'
+    }
+    # Đọc nội dung file ảnh
+    image_data = await file.read()
+    # Thực hiện upload ảnh lên imgur
+    url = "https://api.imgur.com/3/image"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, data={'image': image_data}) as response:
+            if response.status == 200:
+                image_data = await response.json()
+                return image_data['data']['link'], image_data['data']['id'], image_data['data']['deletehash']
+            else:
+                # Lấy thông tin lỗi chi tiết từ phản hồi
+                error_message = await response.text()
+                raise Exception(f"Lỗi khi tải ảnh lên imgur: {error_message}")
+
 @router.post("/users/me/avatar")
 async def upload_avatar(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: BaseModel = Depends(get_current_user)
+    current_user: Union[Student, Teacher] = Depends(get_current_user)
 ):
     # Kiểm tra nếu người dùng là học sinh hoặc giáo viên
     if not isinstance(current_user, (Student, Teacher)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ học sinh và giáo viên mới có thể thay đổi ảnh đại diện")
+    
     # Kiểm tra đuôi tệp ảnh
     if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Định dạng ảnh không hợp lệ")
+    
+    # Upload ảnh lên imgur
+    image_url, image_id, image_delete_hash = await upload_image_to_imgur(file)
+    
     # Xóa ảnh cũ nếu tồn tại
-    if current_user.image:
-        old_file_path = os.path.join(AVATAR_UPLOAD_PATH, current_user.image)
-        if os.path.exists(old_file_path):
-            os.remove(old_file_path)
-    # Tạo tên tệp duy nhất và xác định đường dẫn lưu
-    file_extension = file.filename.split(".")[-1]
-    new_filename = f"{uuid4()}.{file_extension}"
-    file_path = os.path.join(AVATAR_UPLOAD_PATH, new_filename)
-    # Lưu tệp ảnh mới vào thư mục đích
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-    # Cập nhật đường dẫn ảnh vào cơ sở dữ liệu của người dùng
-    image_url = new_filename  # Đường dẫn lưu trữ
+    if current_user.image_delete_hash:
+        # Thực hiện xóa ảnh cũ từ imgur nếu có
+        delete_url = f"https://api.imgur.com/3/image/{current_user.image_delete_hash}"
+        headers = {'Authorization': f'Client-ID YOUR_CLIENT_ID'}
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(delete_url, headers=headers) as delete_response:
+                if delete_response.status != 200:
+                    error_message = await delete_response.text()
+                    raise HTTPException(status_code=400, detail=f"Lỗi khi xóa ảnh cũ từ imgur: {error_message}")
+    
+    # Cập nhật URL ảnh và id ảnh vào cơ sở dữ liệu
     current_user.image = image_url
+    current_user.image_id = image_id
+    current_user.image_delete_hash = image_delete_hash
     db.commit()
-    return {"message": "Tải lên ảnh thành công", "image_url": image_url}
+    
+    return {"message": "Tải lên ảnh thành công", "image_url": image_url, "image_id": image_id}
