@@ -8,12 +8,17 @@ from models import Student, Teacher, Admin, Class, Subject
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from uuid import uuid4
-import aiohttp
 import os
 from typing import Optional, Union
 import uuid
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH, CLIENT_ID1
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, AVATAR_UPLOAD_PATH, SMTP_SERVER, SMTP_PASS, SMTP_PORT, SMTP_USER
 from basemodel.AuthModel import TokenData, Token, ChangeRespone
+from basemodel.ResetPassModel import ResetPasswordRequest
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import string
+import random
+import smtplib
 
 
 router = APIRouter()
@@ -31,6 +36,22 @@ def create_access_token(data: dict, role: str, subject_id:Optional[int] = None, 
     expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire, "role": role, "subject_id": subject_id, "class_id":class_id })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def send_email(to_email: str, reset_code: str):
+    subject = "Mã xác nhận đặt lại mật khẩu"
+    body = f"Xin chào, đây là mã xác nhận của bạn: {reset_code}"
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không thể gửi email: {e}")
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
@@ -218,3 +239,50 @@ async def upload_avatar(
     db.commit()
     
     return {"message": "Tải lên ảnh thành công", "image_url": image_url, "image_id": image_id}
+
+#Gửi mã xác nhận đặt lại mật khẩu
+@router.post("/api/forgot_password")
+def forgot_password(email: str, db: Session = Depends(get_db)):
+    # Tìm email trong bảng Student và Teacher
+    student = db.query(Student).filter(Student.email == email).first()
+    teacher = db.query(Teacher).filter(Teacher.email == email).first()
+
+    if not student and not teacher:
+        raise HTTPException(status_code=404, detail="Không tìm thấy email trong hệ thống.")
+    # Xác định người dùng và lưu mã xác nhận
+    user = student if student else teacher
+    reset_code = ''.join(random.choices(string.ascii_letters + string.digits, k=5))
+    expiry_time = datetime.utcnow() + timedelta(minutes=10)
+
+    user.reset_code = reset_code
+    user.resetPasswordExpiry = expiry_time
+    db.commit()
+    # Gửi email mã xác nhận
+    send_email(user.email, reset_code)
+    return {"message": "Mã xác nhận đã được gửi tới email của bạn."}
+
+# API đặt lại mật khẩu
+@router.post("/api/reset_password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    # Tìm email trong bảng Student và Teacher
+    student = db.query(Student).filter(Student.email == request.email).first()
+    teacher = db.query(Teacher).filter(Teacher.email == request.email).first()
+
+    if not student and not teacher:
+        raise HTTPException(status_code=404, detail="Không tìm thấy email trong hệ thống.")
+    # Xác định người dùng cần đặt lại mật khẩu
+    user = student if student else teacher
+    # Kiểm tra mã xác nhận và thời gian hết hạn
+    if user.reset_code != request.reset_code:
+        raise HTTPException(status_code=400, detail="Mã xác nhận không đúng.")
+    if datetime.utcnow() > user.resetPasswordExpiry:
+        raise HTTPException(status_code=400, detail="Mã xác nhận đã hết hạn.")
+    if request.new_password != request.confirm_password:
+        raise HTTPException(status_code=400, detail="Mật khẩu xác nhận không trùng khớp.")
+    # Cập nhật mật khẩu mới và xóa mã xác nhận
+    user.password = request.new_password  # Hash mật khẩu trước khi lưu nếu cần
+    user.reset_code = None
+    user.resetPasswordExpiry = None
+    db.commit()
+
+    return {"message": "Mật khẩu của bạn đã được đặt lại thành công."}
