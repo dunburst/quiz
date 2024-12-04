@@ -30,6 +30,8 @@ class Teacher(Base):
     image = Column(VARCHAR(255))
     image_id = Column(VARCHAR(255))
     image_delete_hash = Column(VARCHAR(255))
+    reset_code = Column(VARCHAR(255))
+    resetPasswordExpiry = Column(DateTime)
     subject_id = Column(Integer, ForeignKey('subject.subject_id'), nullable=False)
 
 class Grades(Base):
@@ -58,6 +60,8 @@ class Student(Base):
     image = Column(VARCHAR(255))
     image_id = Column(VARCHAR(255))
     image_delete_hash = Column(VARCHAR(255))
+    reset_code = Column(VARCHAR(255))
+    resetPasswordExpiry = Column(DateTime)
     class_id = Column(Integer, ForeignKey('class.class_id'), nullable=False)
     first_login = Column(Boolean, default=True)
 
