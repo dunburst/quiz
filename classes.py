@@ -8,11 +8,15 @@ from auth import hash_password, get_current_user
 import uuid
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
+from student import update_total_students
 
 router = APIRouter()
 #API lấy class
 @router.get("/api/classes", tags=["Classes"])
-def get_all_grades_and_classes(db: Session = Depends(get_db), current_user: Admin = Depends(get_current_user)):
+def get_all_grades_and_classes(
+    db: Session = Depends(get_db), 
+    current_user: Admin = Depends(get_current_user)
+):
     if not isinstance(current_user, Admin):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can access this resource")
     grades = db.query(Grades).all()
@@ -20,14 +24,21 @@ def get_all_grades_and_classes(db: Session = Depends(get_db), current_user: Admi
         raise HTTPException(status_code=404, detail="Không tìm thấy khối nào")
     grades_data = []
     for grade in grades:
+        # Fetch all classes for the current grade
         classes = db.query(Class).filter(Class.id_grades == grade.id_grades).all()
-        class_data = []
+        # Update total students for each class
         for classe in classes:
-            class_data.append({
+            update_total_students(classe.class_id, db)
+        # Prepare class data with updated total_student
+        class_data = [
+            {
                 "class_id": classe.class_id,
                 "name_class": classe.name_class,
                 "total_student": classe.total_student
-            })
+            }
+            for classe in classes
+        ]
+        # Add grade and its classes to the response
         grades_data.append({
             "grade_id": grade.id_grades,
             "grade_name": grade.name_grades,

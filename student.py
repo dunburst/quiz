@@ -40,6 +40,10 @@ def get_all_students(
     # Check if no students are found
     if not students:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No students found")
+         # Update the total students for each class
+    class_ids = {student.class_id for student in students}  # Get unique class IDs
+    for class_id in class_ids:
+        update_total_students(class_id, db)
     # Compile list with student and class information
     student_list = []
     for student in students:
