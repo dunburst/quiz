@@ -378,48 +378,61 @@ def get_quiz_details(quiz_id: str, db: Session = Depends(get_db)):
         questions=question_responses
     )
 
-@router.get("/api/teacher/quizzes/score", response_model=List[QuizSummaryResponse], tags=["Quizzes"])
-def get_quizzes_by_teacher(
-    class_id: int,
+@router.delete("/api/delete/quiz/{quiz_id}", tags=["Quizzes"])
+def delete_quiz(
+    quiz_id: str,
     db: Session = Depends(get_db),
     current_user: Teacher = Depends(get_current_user)
 ):
     if not isinstance(current_user, Teacher):
-        raise HTTPException(status_code=403, detail="Only teachers can access this endpoint.")
-    quiz_summaries = (
-        db.query(
-            Quiz.quiz_id,
-            Quiz.title,
-            Quiz.due_date,
-            func.count(case((Score.status == "Completed", Score.student_id), else_=None)).label("students_with_scores"),
-            func.count(Student.student_id).label("total_student"),
-            func.avg(Score.score).label("average_score")
-        )
-        .join(Class_quiz, Class_quiz.quiz_id == Quiz.quiz_id)
-        .join(Student, Student.class_id == Class_quiz.class_id)
-        .outerjoin(Score, (Score.quiz_id == Quiz.quiz_id) & (Score.student_id == Student.student_id))
-        .filter(Quiz.teacher_id == current_user.teacher_id)  # Filter by current teacher
-        .filter(Class_quiz.class_id == class_id)  # Filter by specific class_id
-        .group_by(Quiz.quiz_id)
-        .all()
-    )
-    return [
-        QuizSummaryResponse(
-            quiz_id=quiz.quiz_id,
-            title=quiz.title,
-            students_with_scores=quiz.students_with_scores,
-            due_date = quiz.due_date,
-            total_student=quiz.total_student,
-            average_score=round(quiz.average_score, 2) if quiz.average_score is not None else 0.0,
-            status=(
-                "Completed"
-                if quiz.students_with_scores == quiz.total_student
-                else ("Ongoing" if quiz.due_date > datetime.now() else "Expired")
+        raise HTTPException(status_code=403, detail="Chỉ giáo viên mới được phép xóa quiz.")
+
+    quiz = db.query(Quiz).filter(Quiz.quiz_id == quiz_id).first()
+
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz không tồn tại")
+
+    if quiz.teacher_id != current_user.teacher_id:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền xóa quiz này.")
+
+    try:
+        # Xóa dữ liệu theo thứ tự khóa ngoại
+        # 1. Xóa lựa chọn (choices)
+        db.query(Choice).filter(
+            Choice.answer_id.in_(
+                db.query(Answer.answer_id).filter(
+                    Answer.question_id.in_(
+                        db.query(Questions.question_id).filter(Questions.quiz_id == quiz_id)
+                    )
+                )
             )
-        )
-        for quiz in quiz_summaries
-    ]
+        ).delete(synchronize_session=False)
 
+        # 2. Xóa câu trả lời (answers)
+        db.query(Answer).filter(
+            Answer.question_id.in_(
+                db.query(Questions.question_id).filter(Questions.quiz_id == quiz_id)
+            )
+        ).delete(synchronize_session=False)
 
+        # 3. Xóa câu hỏi (questions)
+        db.query(Questions).filter(Questions.quiz_id == quiz_id).delete(synchronize_session=False)
+
+        # 4. Xóa điểm số (scores)
+        db.query(Score).filter(Score.quiz_id == quiz_id).delete(synchronize_session=False)
+
+        # 5. Xóa liên kết lớp và quiz (class_quiz)
+        db.query(Class_quiz).filter(Class_quiz.quiz_id == quiz_id).delete(synchronize_session=False)
+
+        # 6. Xóa chính quiz
+        db.query(Quiz).filter(Quiz.quiz_id == quiz_id).delete(synchronize_session=False)
+
+        db.commit()
+
+        return {"message": f"Quiz với ID {quiz_id} đã được xóa thành công"}
+
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Lỗi xóa dữ liệu liên quan đến quiz: " + str(e))
 
 
